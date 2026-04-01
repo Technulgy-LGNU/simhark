@@ -3,9 +3,9 @@
 //! Each parallel world can have slightly different physics constants,
 //! making trained policies more robust when deployed on real robots.
 
-use rand::Rng;
-use rand_chacha::ChaCha8Rng;
+use rand::RngExt;
 use rand::SeedableRng;
+use rand_chacha::ChaCha8Rng;
 use serde::{Deserialize, Serialize};
 
 use crate::config::WorldConfig;
@@ -112,7 +112,11 @@ impl DomainRandomizer {
     /// `world_index` is used to seed the RNG deterministically.
     pub fn randomize(&self, base: &WorldConfig, world_index: usize) -> WorldConfig {
         let mut config = base.clone();
-        let mut rng = ChaCha8Rng::seed_from_u64(base.seed.wrapping_add(world_index as u64).wrapping_mul(0x9E3779B97F4A7C15));
+        let mut rng = ChaCha8Rng::seed_from_u64(
+            base.seed
+                .wrapping_add(world_index as u64)
+                .wrapping_mul(0x9E3779B97F4A7C15),
+        );
 
         let r = &self.randomization;
 
@@ -139,11 +143,16 @@ impl DomainRandomizer {
     }
 }
 
-fn randomize_robot_config(rng: &mut ChaCha8Rng, cfg: &mut crate::config::RobotConfig, r: &RandomizationConfig) {
+fn randomize_robot_config(
+    rng: &mut ChaCha8Rng,
+    cfg: &mut crate::config::RobotConfig,
+    r: &RandomizationConfig,
+) {
     cfg.body_mass = mutate(rng, cfg.body_mass, r.robot_mass);
     cfg.radius = mutate(rng, cfg.radius, r.robot_radius);
     cfg.wheel_tangent_friction = mutate(rng, cfg.wheel_tangent_friction, r.wheel_friction);
-    cfg.wheel_perpendicular_friction = mutate(rng, cfg.wheel_perpendicular_friction, r.wheel_friction);
+    cfg.wheel_perpendicular_friction =
+        mutate(rng, cfg.wheel_perpendicular_friction, r.wheel_friction);
     cfg.wheel_motor_fmax = mutate(rng, cfg.wheel_motor_fmax, r.wheel_motor_fmax);
     cfg.kicker_damp_factor = mutate(rng, cfg.kicker_damp_factor, r.kicker_damp_factor);
     cfg.kicker_friction = mutate(rng, cfg.kicker_friction, r.kicker_friction);
@@ -195,7 +204,10 @@ mod tests {
         let any_different = base.ball.mass != mutated.ball.mass
             || base.ball.friction != mutated.ball.friction
             || base.blue_robots.body_mass != mutated.blue_robots.body_mass;
-        assert!(any_different, "moderate randomization should change at least some values");
+        assert!(
+            any_different,
+            "moderate randomization should change at least some values"
+        );
     }
 
     #[test]
@@ -217,9 +229,11 @@ mod tests {
         let m1 = randomizer.randomize(&base, 0);
         let m2 = randomizer.randomize(&base, 1);
 
-        let any_different = m1.ball.mass != m2.ball.mass
-            || m1.ball.friction != m2.ball.friction;
-        assert!(any_different, "different world indices should produce different configs");
+        let any_different = m1.ball.mass != m2.ball.mass || m1.ball.friction != m2.ball.friction;
+        assert!(
+            any_different,
+            "different world indices should produce different configs"
+        );
     }
 
     #[test]

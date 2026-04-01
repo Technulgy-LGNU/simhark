@@ -5,7 +5,7 @@
 //! to the chassis. This avoids the instability of modeling individual wheel
 //! bodies while maintaining behavioral fidelity to grSim's movement model.
 
-use nalgebra::{Isometry3, Point3, SMatrix, SVector, UnitQuaternion, Vector3 as NVec3};
+use nalgebra::{Isometry3, Point3, SMatrix, SVector, Unit, UnitQuaternion, Vector3 as NVec3};
 use rapier3d::prelude::*;
 
 use crate::config::{RobotConfig, WorldConfig, BALL_COLLISION_SUBSTEPS, WALL_COUNT, WHEEL_COUNT};
@@ -70,7 +70,6 @@ pub struct PhysicsWorld {
     pub impulse_joint_set: ImpulseJointSet,
     pub multibody_joint_set: MultibodyJointSet,
     pub ccd_solver: CCDSolver,
-    pub query_pipeline: QueryPipeline,
 
     pub ball_body: RigidBodyHandle,
     pub ball_collider: ColliderHandle,
@@ -106,7 +105,7 @@ impl PhysicsWorld {
         // Ground plane
         let ground_body = rigid_body_set.insert(RigidBodyBuilder::fixed().build());
         let ground_collider = collider_set.insert_with_parent(
-            ColliderBuilder::halfspace(NVec3::z_axis())
+            ColliderBuilder::halfspace(Unit::new_unchecked(Vector::new(0.0, 0.0, 1.0)))
                 .friction(0.5)
                 .restitution(0.0)
                 .build(),
@@ -117,7 +116,7 @@ impl PhysicsWorld {
         // Ball
         let ball_pos = NVec3::new(0.0, 0.0, config.ball.radius as f32 * 1.2);
         let ball_rb = RigidBodyBuilder::dynamic()
-            .translation(ball_pos)
+            .translation(to_rapier_vec(ball_pos))
             .linear_damping(config.ball.linear_damping as f32)
             .angular_damping(config.ball.angular_damping as f32)
             .ccd_enabled(true)
@@ -183,7 +182,6 @@ impl PhysicsWorld {
             impulse_joint_set,
             multibody_joint_set,
             ccd_solver: CCDSolver::new(),
-            query_pipeline: QueryPipeline::new(),
             ball_body,
             ball_collider,
             blue_robots,
@@ -222,7 +220,7 @@ impl PhysicsWorld {
         let mut add_wall = |cx: f64, cy: f64, cz: f64, hx: f64, hy: f64, hz: f64| {
             let body = bodies.insert(
                 RigidBodyBuilder::fixed()
-                    .translation(NVec3::new(cx as f32, cy as f32, cz as f32))
+                    .translation(Vector::new(cx as f32, cy as f32, cz as f32))
                     .build(),
             );
             let ch = colliders.insert_with_parent(
@@ -277,7 +275,7 @@ impl PhysicsWorld {
 
         // Chassis (cylinder) - the entire robot body
         let chassis_rb = RigidBodyBuilder::dynamic()
-            .position(chassis_iso)
+            .pose(chassis_iso.into())
             .linear_damping(0.5)
             .angular_damping(1.0)
             // Lock Z rotation to keep robot upright (only rotate around Z axis for yaw)
@@ -299,7 +297,7 @@ impl PhysicsWorld {
         );
 
         let chassis_rb = RigidBodyBuilder::dynamic()
-            .position(chassis_iso)
+            .pose(chassis_iso.into())
             .linear_damping(0.5)
             .angular_damping(1.0)
             .enabled_rotations(false, false, true)
@@ -322,8 +320,8 @@ impl PhysicsWorld {
         let kicker_world = chassis_iso * Point3::from(kicker_local);
 
         let kicker_rb = RigidBodyBuilder::dynamic()
-            .translation(kicker_world.coords)
-            .rotation(rot.scaled_axis())
+            .translation(to_rapier_vec(kicker_world.coords))
+            .rotation(to_rapier_vec(rot.scaled_axis()))
             .enabled_rotations(false, false, true)
             .build();
         let kicker_body = bodies.insert(kicker_rb);
@@ -341,8 +339,8 @@ impl PhysicsWorld {
         );
 
         let kicker_joint = FixedJointBuilder::new()
-            .local_anchor1(Point3::from(kicker_local))
-            .local_anchor2(Point3::origin());
+            .local_anchor1(to_rapier_vec(kicker_local))
+            .local_anchor2(Vector::ZERO);
         let kicker_joint = impulse_joints.insert(chassis_body, kicker_body, kicker_joint, true);
 
         RobotHandles {
@@ -357,7 +355,7 @@ impl PhysicsWorld {
     /// Perform one physics sub-step.
     pub fn substep(&mut self) {
         self.physics_pipeline.step(
-            &self.gravity,
+            to_rapier_vec(self.gravity),
             &self.integration_parameters,
             &mut self.island_manager,
             &mut self.broad_phase,
@@ -367,7 +365,6 @@ impl PhysicsWorld {
             &mut self.impulse_joint_set,
             &mut self.multibody_joint_set,
             &mut self.ccd_solver,
-            Some(&mut self.query_pipeline),
             &(),
             &(),
         );
@@ -376,17 +373,17 @@ impl PhysicsWorld {
     /// Apply ball rolling friction (matches grSim's ball friction model).
     pub fn apply_ball_friction(&mut self) {
         let ball = &self.rigid_body_set[self.ball_body];
-        let vel = *ball.linvel();
+        let vel = ball.linvel();
         let speed = (vel.x * vel.x + vel.y * vel.y + vel.z * vel.z).sqrt();
 
         if speed > 0.01 {
             let fk = self.ball_friction * self.ball_mass * self.gravity_val;
-            let friction_force = NVec3::new(
+            let friction_force = Vector::new(
                 -fk * vel.x / speed,
                 -fk * vel.y / speed,
                 -fk * vel.z / speed,
             );
-            let torque = NVec3::new(
+            let torque = Vector::new(
                 -friction_force.y * self.ball_radius,
                 friction_force.x * self.ball_radius,
                 0.0,
@@ -396,8 +393,8 @@ impl PhysicsWorld {
             ball.add_torque(torque, true);
         } else {
             let ball = &mut self.rigid_body_set[self.ball_body];
-            ball.set_linvel(NVec3::zeros(), true);
-            ball.set_angvel(NVec3::zeros(), true);
+            ball.set_linvel(Vector::ZERO, true);
+            ball.set_angvel(Vector::ZERO, true);
         }
     }
 
@@ -407,18 +404,16 @@ impl PhysicsWorld {
     /// `vx`, `vy` are in the robot's local frame, `vw` is angular velocity.
     pub fn apply_robot_velocity(&mut self, robot: &RobotHandles, vx: f32, vy: f32, vw: f32) {
         let body = &self.rigid_body_set[robot.chassis_body];
-        let yaw = {
-            let (_, _, yaw) = body.rotation().euler_angles();
-            yaw
-        };
+        let facing = body.rotation().mul_vec3(Vector::X);
+        let yaw = facing.y.atan2(facing.x);
 
         // Convert local velocity to world frame
         let world_vx = vx * yaw.cos() - vy * yaw.sin();
         let world_vy = vx * yaw.sin() + vy * yaw.cos();
 
         let body = &mut self.rigid_body_set[robot.chassis_body];
-        body.set_linvel(NVec3::new(world_vx, world_vy, body.linvel().z), true);
-        body.set_angvel(NVec3::new(0.0, 0.0, vw), true);
+        body.set_linvel(Vector::new(world_vx, world_vy, body.linvel().z), true);
+        body.set_angvel(Vector::new(0.0, 0.0, vw), true);
     }
 
     /// Update one wheel speed and immediately project the full wheel set to chassis motion.
@@ -455,47 +450,55 @@ impl PhysicsWorld {
 
     /// Get position of a rigid body.
     pub fn get_body_position(&self, handle: RigidBodyHandle) -> NVec3<f32> {
-        *self.rigid_body_set[handle].translation()
+        to_nalgebra_vec(self.rigid_body_set[handle].translation())
     }
 
     /// Get linear velocity of a rigid body.
     pub fn get_body_linvel(&self, handle: RigidBodyHandle) -> NVec3<f32> {
-        *self.rigid_body_set[handle].linvel()
+        to_nalgebra_vec(self.rigid_body_set[handle].linvel())
     }
 
     /// Get angular velocity of a rigid body.
     pub fn get_body_angvel(&self, handle: RigidBodyHandle) -> NVec3<f32> {
-        *self.rigid_body_set[handle].angvel()
+        to_nalgebra_vec(self.rigid_body_set[handle].angvel())
     }
 
     /// Get orientation (yaw) angle in radians.
     pub fn get_body_yaw(&self, handle: RigidBodyHandle) -> f32 {
         let rot = self.rigid_body_set[handle].rotation();
-        let (_, _, yaw) = rot.euler_angles();
-        yaw
+        let facing = rot.mul_vec3(Vector::X);
+        facing.y.atan2(facing.x)
     }
 
     /// Set body position.
     pub fn teleport_body(&mut self, handle: RigidBodyHandle, x: f32, y: f32, z: f32) {
         let body = &mut self.rigid_body_set[handle];
         let rot = *body.rotation();
-        body.set_position(Isometry3::from_parts(NVec3::new(x, y, z).into(), rot), true);
+        body.set_position(Pose::from_parts(Vector::new(x, y, z), rot), true);
     }
 
     /// Set body orientation (yaw).
     pub fn set_body_yaw(&mut self, handle: RigidBodyHandle, yaw: f32) {
         let body = &mut self.rigid_body_set[handle];
-        let pos = *body.translation();
-        let rot = UnitQuaternion::from_axis_angle(&NVec3::z_axis(), yaw);
-        body.set_position(Isometry3::from_parts(pos.into(), rot), true);
+        let pos = body.translation();
+        let rot = Rotation::from_rotation_z(yaw);
+        body.set_position(Pose::from_parts(pos, rot), true);
     }
 
     /// Reset all velocities for a body.
     pub fn reset_body_velocity(&mut self, handle: RigidBodyHandle) {
         let body = &mut self.rigid_body_set[handle];
-        body.set_linvel(NVec3::zeros(), true);
-        body.set_angvel(NVec3::zeros(), true);
+        body.set_linvel(Vector::ZERO, true);
+        body.set_angvel(Vector::ZERO, true);
     }
+}
+
+fn to_rapier_vec(v: NVec3<f32>) -> Vector {
+    Vector::new(v.x, v.y, v.z)
+}
+
+fn to_nalgebra_vec(v: Vector) -> NVec3<f32> {
+    NVec3::new(v.x, v.y, v.z)
 }
 
 /// Default blue team positions (spread on the negative-x half).

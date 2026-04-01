@@ -1,6 +1,6 @@
 //! Single simulation world, combining physics + robot logic + game state.
 
-use nalgebra::Vector3 as NVec3;
+use rapier3d::prelude::Vector;
 
 use crate::command::{MoveCommand, RobotCommand, TeleportBall, TeleportRobot, WorldCommand};
 use crate::config::{WorldConfig, BALL_COLLISION_SUBSTEPS};
@@ -205,7 +205,7 @@ impl World {
                     let speed_z = kick_angle_rad.sin() * kick_speed;
 
                     let ball = &mut self.physics.rigid_body_set[ball_body];
-                    let old_vel = *ball.linvel();
+                    let old_vel = ball.linvel();
 
                     let damp = robot_cfg.kicker_damp_factor as f32;
                     let vn = -(old_vel.x * dir[0] as f32 + old_vel.y * dir[1] as f32) * damp;
@@ -217,7 +217,7 @@ impl World {
                         dir[1] as f32 * speed_xy as f32 + vn * dir[1] as f32 + vt * dir[0] as f32;
                     let vz = speed_z as f32;
 
-                    ball.set_linvel(NVec3::new(vx, vy, vz), true);
+                    ball.set_linvel(Vector::new(vx, vy, vz), true);
 
                     sim.kick_type = if speed_z >= 1.0 {
                         KickType::Chip
@@ -269,8 +269,8 @@ impl World {
 
         self.physics.teleport_body(ball_body, x, y, z);
         let ball = &mut self.physics.rigid_body_set[ball_body];
-        ball.set_linvel(NVec3::new(vx, vy, vz), true);
-        ball.set_angvel(NVec3::zeros(), true);
+        ball.set_linvel(Vector::new(vx, vy, vz), true);
+        ball.set_angvel(Vector::ZERO, true);
     }
 
     fn teleport_robot(&mut self, tr: &TeleportRobot) {
