@@ -45,6 +45,14 @@ impl World {
 
     /// Apply commands and step the simulation forward by one time step.
     pub fn step(&mut self, commands: &WorldCommand) -> WorldState {
+        self.advance(commands);
+
+        // Extract state
+        self.get_state()
+    }
+
+    /// Advance the simulation by one time step without extracting a state snapshot.
+    pub fn advance(&mut self, commands: &WorldCommand) {
         // Apply teleportation commands
         if let Some(ref tb) = commands.teleport_ball {
             self.teleport_ball(tb);
@@ -76,14 +84,16 @@ impl World {
 
         self.sim_time += self.config.physics.delta_time;
         self.frame += 1;
-
-        // Extract state
-        self.get_state()
     }
 
     /// Step without any commands (useful for free-running simulation).
     pub fn step_empty(&mut self) -> WorldState {
         self.step(&WorldCommand::default())
+    }
+
+    /// Advance without commands and without extracting a state snapshot.
+    pub fn advance_empty(&mut self) {
+        self.advance(&WorldCommand::default())
     }
 
     fn apply_robot_commands(&mut self, commands: &[RobotCommand], team: TeamColor) {
@@ -110,17 +120,16 @@ impl World {
             if cmd.id >= sims.len() {
                 continue;
             }
-            let sim = &mut sims[cmd.id];
-            let handle = &handle_copies[cmd.id];
 
+            let sim = &mut sims[cmd.id];
             if !sim.is_on {
                 continue;
             }
 
-            // Dribbler
+            let handle = &handle_copies[cmd.id];
+
             sim.dribbler_on = cmd.dribbler_on;
 
-            // Movement
             if let Some(ref mc) = cmd.move_command {
                 let linvel = self.physics.get_body_linvel(handle.chassis_body);
                 let angvel = self.physics.get_body_angvel(handle.chassis_body);
@@ -155,13 +164,10 @@ impl World {
                             dt,
                         );
                     }
-                    MoveCommand::WheelVelocity(speeds) => {
-                        sim.set_wheel_speeds(*speeds);
-                    }
+                    MoveCommand::WheelVelocity(speeds) => sim.set_wheel_speeds(*speeds),
                 }
             }
 
-            // Kick
             if cmd.kick_speed > 0.0001 {
                 let ball_body = self.physics.ball_body;
                 let ball_pos = self.physics.get_body_position(ball_body);
@@ -198,11 +204,9 @@ impl World {
                     let speed_xy = kick_angle_rad.cos() * kick_speed;
                     let speed_z = kick_angle_rad.sin() * kick_speed;
 
-                    // Apply kick velocity to ball
                     let ball = &mut self.physics.rigid_body_set[ball_body];
                     let old_vel = *ball.linvel();
 
-                    // Damp existing velocity component along kick direction
                     let damp = robot_cfg.kicker_damp_factor as f32;
                     let vn = -(old_vel.x * dir[0] as f32 + old_vel.y * dir[1] as f32) * damp;
                     let vt = -(old_vel.x * dir[1] as f32 - old_vel.y * dir[0] as f32);
@@ -237,6 +241,7 @@ impl World {
                 }
             }
         }
+
         let yellow_handles = self.physics.yellow_robots.clone();
         for (sim, handle) in self.yellow_sims.iter().zip(yellow_handles.iter()) {
             if sim.is_on {
@@ -364,6 +369,7 @@ impl World {
     }
 
     fn extract_robot_states(&self, team: TeamColor) -> Vec<RobotState> {
+        let ball_pos = self.physics.get_body_position(self.physics.ball_body);
         let (sims, handles, robot_cfg) = match team {
             TeamColor::Blue => (
                 &self.blue_sims,
@@ -386,7 +392,6 @@ impl World {
                 let yaw = self.physics.get_body_yaw(handle.chassis_body);
 
                 // Check infrared (ball near kicker)
-                let ball_pos = self.physics.get_body_position(self.physics.ball_body);
                 let kicker_pos = self.physics.get_body_position(handle.kicker_body);
                 let dir = [yaw.cos() as f64, yaw.sin() as f64];
                 let infrared = is_ball_touching_kicker(

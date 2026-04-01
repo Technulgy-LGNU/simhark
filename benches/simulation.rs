@@ -1,9 +1,9 @@
 //! Benchmarks for parallel simulation throughput.
 
-use criterion::{criterion_group, criterion_main, Criterion, BenchmarkId};
-use robocup_sim::*;
+use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion};
 use robocup_sim::command::*;
 use robocup_sim::domain_randomization::*;
+use robocup_sim::*;
 
 fn bench_world_creation(c: &mut Criterion) {
     let config = WorldConfig::division_a();
@@ -17,9 +17,7 @@ fn bench_single_step(c: &mut Criterion) {
     let mut world = World::new(0, config);
     let cmd = WorldCommand::default();
 
-    c.bench_function("single_world_step", |b| {
-        b.iter(|| world.step(&cmd))
-    });
+    c.bench_function("single_world_step", |b| b.iter(|| world.step(&cmd)));
 }
 
 fn bench_parallel_steps(c: &mut Criterion) {
@@ -29,13 +27,23 @@ fn bench_parallel_steps(c: &mut Criterion) {
         let config = WorldConfig::division_a();
         let mut engine = SimulationEngine::new(count, config);
 
-        group.bench_with_input(
-            BenchmarkId::new("worlds", count),
-            &count,
-            |b, _| {
-                b.iter(|| engine.step_all())
-            },
-        );
+        group.bench_with_input(BenchmarkId::new("worlds", count), &count, |b, _| {
+            b.iter(|| engine.step_all())
+        });
+    }
+    group.finish();
+}
+
+fn bench_parallel_advance(c: &mut Criterion) {
+    let mut group = c.benchmark_group("parallel_advance");
+
+    for &count in &[16, 64, 256, 1024] {
+        let config = WorldConfig::division_a();
+        let mut engine = SimulationEngine::new(count, config);
+
+        group.bench_with_input(BenchmarkId::new("worlds", count), &count, |b, _| {
+            b.iter(|| engine.advance_all())
+        });
     }
     group.finish();
 }
@@ -66,13 +74,9 @@ fn bench_parallel_with_commands(c: &mut Criterion) {
             })
             .collect();
 
-        group.bench_with_input(
-            BenchmarkId::new("worlds", count),
-            &count,
-            |b, _| {
-                b.iter(|| engine.step_with_commands(&commands))
-            },
-        );
+        group.bench_with_input(BenchmarkId::new("worlds", count), &count, |b, _| {
+            b.iter(|| engine.step_with_commands(&commands))
+        });
     }
     group.finish();
 }
@@ -91,6 +95,7 @@ criterion_group!(
     bench_world_creation,
     bench_single_step,
     bench_parallel_steps,
+    bench_parallel_advance,
     bench_parallel_with_commands,
     bench_randomized_creation,
 );

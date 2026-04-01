@@ -29,7 +29,11 @@ impl SimulationEngine {
     }
 
     /// Create worlds with domain randomization applied per-world.
-    pub fn new_randomized(count: usize, config: WorldConfig, randomization: RandomizationConfig) -> Self {
+    pub fn new_randomized(
+        count: usize,
+        config: WorldConfig,
+        randomization: RandomizationConfig,
+    ) -> Self {
         let randomizer = DomainRandomizer::new(randomization);
         let worlds: Vec<World> = (0..count)
             .into_par_iter()
@@ -62,6 +66,31 @@ impl SimulationEngine {
             .collect()
     }
 
+    /// Advance all worlds with the same command without collecting state snapshots.
+    pub fn advance_all_same(&mut self, command: &WorldCommand) {
+        self.worlds
+            .par_iter_mut()
+            .for_each(|world| world.advance(command));
+    }
+
+    /// Advance all worlds with no commands and without collecting state snapshots.
+    pub fn advance_all(&mut self) {
+        self.worlds.par_iter_mut().for_each(World::advance_empty);
+    }
+
+    /// Advance each world with its own command without collecting state snapshots.
+    pub fn advance_with_commands(&mut self, commands: &[WorldCommand]) {
+        assert_eq!(
+            commands.len(),
+            self.worlds.len(),
+            "commands length must match world count"
+        );
+        self.worlds
+            .par_iter_mut()
+            .zip(commands.par_iter())
+            .for_each(|(world, cmd)| world.advance(cmd));
+    }
+
     /// Step each world with its own command. `commands` must have length == count().
     pub fn step_with_commands(&mut self, commands: &[WorldCommand]) -> Vec<WorldState> {
         assert_eq!(
@@ -79,11 +108,7 @@ impl SimulationEngine {
     /// Step a subset of worlds (by index) with individual commands.
     /// Returns states for just those worlds.
     /// Note: indices must not contain duplicates.
-    pub fn step_subset(
-        &mut self,
-        indices: &[usize],
-        commands: &[WorldCommand],
-    ) -> Vec<WorldState> {
+    pub fn step_subset(&mut self, indices: &[usize], commands: &[WorldCommand]) -> Vec<WorldState> {
         assert_eq!(indices.len(), commands.len());
         // Sequential for safety (no overlapping mutable borrows)
         indices
