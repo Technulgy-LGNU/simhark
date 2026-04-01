@@ -1,16 +1,16 @@
 [package]
-name = "robocup-sim"
+name = "simhark"
 version = "0.1.0"
 edition = "2024"
 description = "A high-performance parallel RoboCup SSL simulator inspired by grSim"
 license = "GPL-3.0"
 
 [lib]
-name = "robocup_sim"
+name = "simhark"
 path = "src/lib.rs"
 
 [[bin]]
-name = "robocup-sim"
+name = "simhark"
 path = "src/main.rs"
 
 [dependencies]

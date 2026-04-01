@@ -1,9 +1,9 @@
 //! Benchmarks for parallel simulation throughput.
 
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion};
-use robocup_sim::command::*;
-use robocup_sim::domain_randomization::*;
-use robocup_sim::*;
+use simhark::command::*;
+use simhark::domain_randomization::*;
+use simhark::*;
 
 fn bench_world_creation(c: &mut Criterion) {
     let config = WorldConfig::division_a();

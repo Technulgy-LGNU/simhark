@@ -3,11 +3,11 @@
 //! These tests verify behavioral correctness matching grSim, determinism
 //! across parallel worlds, and physics consistency.
 
-use robocup_sim::*;
-use robocup_sim::command::*;
-use robocup_sim::config::*;
-use robocup_sim::state::*;
-use robocup_sim::domain_randomization::*;
+use simhark::*;
+use simhark::command::*;
+use simhark::config::*;
+use simhark::state::*;
+use simhark::domain_randomization::*;
 
 // ============================================================================
 // World creation and initial state
@@ -607,7 +607,7 @@ fn test_randomized_worlds_diverge() {
 fn test_velocity_limit_in_command() {
     // Test that the velocity limiting in RobotSim works correctly
     let config = WorldConfig::division_a();
-    let mut sim = robocup_sim::robot::RobotSim::new(0, &config.blue_robots, 1.0);
+    let mut sim = simhark::robot::RobotSim::new(0, &config.blue_robots, 1.0);
 
     // Request absurd velocity
     sim.set_local_velocity(100.0, 0.0, 0.0, 0.0, 0.0, 1.0 / 60.0);

@@ -2,7 +2,7 @@
 //!
 //! Supports headless mode for training and a debug viewer mode.
 
-use robocup_sim::{
+use simhark::{
     domain_randomization::RandomizationConfig, GrSimCompatConfig, GrSimCompatServer, MoveCommand,
     RobotCommand, SimulationEngine, WorldCommand, WorldConfig,
 };
@@ -12,7 +12,7 @@ fn main() {
     env_logger::init();
 
     let args: Vec<String> = std::env::args().collect();
-    let num_worlds: usize = args.get(1).and_then(|s| s.parse().ok()).unwrap_or(64);
+    let num_worlds: usize = args.get(1).and_then(|s| s.parse().ok()).unwrap_or(512);
     let num_steps: usize = args.get(2).and_then(|s| s.parse().ok()).unwrap_or(1000);
     let randomize = args.iter().any(|a| a == "--randomize");
     let grsim_api = args.iter().any(|a| a == "--grsim-api");

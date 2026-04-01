@@ -14,7 +14,7 @@
 //!
 //! ## Quick Start
 //! ```rust
-//! use robocup_sim::{SimulationEngine, WorldConfig, RobotCommand};
+//! use simhark::{SimulationEngine, WorldConfig, RobotCommand};
 //!
 //! // Create engine with 1024 parallel worlds
 //! let mut engine = SimulationEngine::new(1024, WorldConfig::division_a());
