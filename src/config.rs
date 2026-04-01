@@ -46,10 +46,10 @@ impl WorldConfig {
         }
     }
 
-    /// Division B defaults (9m x 6m field, 11 robots).
+    /// Division B defaults (9m x 6m field, 6 robots).
     pub fn division_b() -> Self {
         Self {
-            robots_per_team: 11,
+            robots_per_team: 6,
             field: FieldConfig::division_b(),
             ball: BallConfig::default(),
             blue_robots: RobotConfig::default(),
