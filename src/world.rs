@@ -89,8 +89,14 @@ impl World {
     fn apply_robot_commands(&mut self, commands: &[RobotCommand], team: TeamColor) {
         // Clone handles out to avoid borrow conflict with self.physics
         let (robot_cfg, handle_copies) = match team {
-            TeamColor::Blue => (self.config.blue_robots.clone(), self.physics.blue_robots.clone()),
-            TeamColor::Yellow => (self.config.yellow_robots.clone(), self.physics.yellow_robots.clone()),
+            TeamColor::Blue => (
+                self.config.blue_robots.clone(),
+                self.physics.blue_robots.clone(),
+            ),
+            TeamColor::Yellow => (
+                self.config.yellow_robots.clone(),
+                self.physics.yellow_robots.clone(),
+            ),
         };
         let dt = self.config.physics.delta_time;
         let ball_radius = self.config.ball.radius;
@@ -122,14 +128,32 @@ impl World {
                 let current_angvel = angvel.z as f64;
 
                 match mc {
-                    MoveCommand::LocalVelocity { forward, left, angular } => {
-                        sim.set_local_velocity(*forward, *left, *angular, current_speed, current_angvel, dt);
+                    MoveCommand::LocalVelocity {
+                        forward,
+                        left,
+                        angular,
+                    } => {
+                        sim.set_local_velocity(
+                            *forward,
+                            *left,
+                            *angular,
+                            current_speed,
+                            current_angvel,
+                            dt,
+                        );
                     }
                     MoveCommand::GlobalVelocity { vx, vy, angular } => {
                         let yaw = self.physics.get_body_yaw(handle.chassis_body) as f64;
                         let local_vx = vx * (-yaw).cos() - vy * (-yaw).sin();
                         let local_vy = vy * (-yaw).cos() + vx * (-yaw).sin();
-                        sim.set_local_velocity(local_vx, local_vy, *angular, current_speed, current_angvel, dt);
+                        sim.set_local_velocity(
+                            local_vx,
+                            local_vy,
+                            *angular,
+                            current_speed,
+                            current_angvel,
+                            dt,
+                        );
                     }
                     MoveCommand::WheelVelocity(speeds) => {
                         sim.set_wheel_speeds(*speeds);
@@ -147,7 +171,11 @@ impl World {
 
                 let touching = is_ball_touching_kicker(
                     [ball_pos.x as f64, ball_pos.y as f64, ball_pos.z as f64],
-                    [kicker_pos.x as f64, kicker_pos.y as f64, kicker_pos.z as f64],
+                    [
+                        kicker_pos.x as f64,
+                        kicker_pos.y as f64,
+                        kicker_pos.z as f64,
+                    ],
                     dir,
                     robot_cfg.kicker_thickness,
                     robot_cfg.kicker_width,
@@ -179,13 +207,19 @@ impl World {
                     let vn = -(old_vel.x * dir[0] as f32 + old_vel.y * dir[1] as f32) * damp;
                     let vt = -(old_vel.x * dir[1] as f32 - old_vel.y * dir[0] as f32);
 
-                    let vx = dir[0] as f32 * speed_xy as f32 + vn * dir[0] as f32 - vt * dir[1] as f32;
-                    let vy = dir[1] as f32 * speed_xy as f32 + vn * dir[1] as f32 + vt * dir[0] as f32;
+                    let vx =
+                        dir[0] as f32 * speed_xy as f32 + vn * dir[0] as f32 - vt * dir[1] as f32;
+                    let vy =
+                        dir[1] as f32 * speed_xy as f32 + vn * dir[1] as f32 + vt * dir[0] as f32;
                     let vz = speed_z as f32;
 
                     ball.set_linvel(NVec3::new(vx, vy, vz), true);
 
-                    sim.kick_type = if speed_z >= 1.0 { KickType::Chip } else { KickType::Flat };
+                    sim.kick_type = if speed_z >= 1.0 {
+                        KickType::Chip
+                    } else {
+                        KickType::Flat
+                    };
                     sim.kick_countdown = 10;
                 }
             }
@@ -198,7 +232,8 @@ impl World {
         for (sim, handle) in self.blue_sims.iter().zip(blue_handles.iter()) {
             if sim.is_on {
                 for i in 0..4 {
-                    self.physics.set_wheel_speed(handle, i, sim.wheel_speeds[i] as f32);
+                    self.physics
+                        .set_wheel_speed(handle, i, sim.wheel_speeds[i] as f32);
                 }
             }
         }
@@ -206,7 +241,8 @@ impl World {
         for (sim, handle) in self.yellow_sims.iter().zip(yellow_handles.iter()) {
             if sim.is_on {
                 for i in 0..4 {
-                    self.physics.set_wheel_speed(handle, i, sim.wheel_speeds[i] as f32);
+                    self.physics
+                        .set_wheel_speed(handle, i, sim.wheel_speeds[i] as f32);
                 }
             }
         }
@@ -219,8 +255,9 @@ impl World {
 
         let x = tb.x.unwrap_or(pos.x as f64) as f32;
         let y = tb.y.unwrap_or(pos.y as f64) as f32;
-        let z = tb.z.map(|z| (self.config.ball.radius + 0.005 + z) as f32)
-            .unwrap_or(pos.z);
+        let z =
+            tb.z.map(|z| (self.config.ball.radius + 0.005 + z) as f32)
+                .unwrap_or(pos.z);
         let vx = tb.vx.unwrap_or(vel.x as f64) as f32;
         let vy = tb.vy.unwrap_or(vel.y as f64) as f32;
         let vz = tb.vz.unwrap_or(vel.z as f64) as f32;
@@ -241,11 +278,15 @@ impl World {
         // Clone handle to avoid borrow conflict
         let handle = match tr.team {
             TeamColor::Blue => {
-                if tr.id >= self.physics.blue_robots.len() { return; }
+                if tr.id >= self.physics.blue_robots.len() {
+                    return;
+                }
                 self.physics.blue_robots[tr.id].clone()
             }
             TeamColor::Yellow => {
-                if tr.id >= self.physics.yellow_robots.len() { return; }
+                if tr.id >= self.physics.yellow_robots.len() {
+                    return;
+                }
                 self.physics.yellow_robots[tr.id].clone()
             }
         };
@@ -263,11 +304,13 @@ impl World {
         let x = tr.x.unwrap_or(pos.x as f64) as f32;
         let y = tr.y.unwrap_or(pos.y as f64) as f32;
 
-        self.physics.teleport_body(handle.chassis_body, x, y, start_z);
+        self.physics
+            .teleport_body(handle.chassis_body, x, y, start_z);
         self.physics.reset_body_velocity(handle.chassis_body);
 
         if let Some(orientation) = tr.orientation {
-            self.physics.set_body_yaw(handle.chassis_body, orientation as f32);
+            self.physics
+                .set_body_yaw(handle.chassis_body, orientation as f32);
         }
 
         if let Some(present) = tr.present {
@@ -275,7 +318,8 @@ impl World {
             if !present {
                 let off_x = 1e6 * tr.id as f32;
                 let off_y = 1e6 * tr.team as u8 as f32;
-                self.physics.teleport_body(handle.chassis_body, off_x, off_y, start_z);
+                self.physics
+                    .teleport_body(handle.chassis_body, off_x, off_y, start_z);
             }
         }
 
@@ -302,10 +346,10 @@ impl World {
         // Simple goal detection: ball crossed goal line
         let half_length = self.config.field.field_length / 2.0;
         let half_goal_width = self.config.field.goal_width / 2.0;
-        let goal_blue = ball_pos.x as f64 > half_length
-            && (ball_pos.y as f64).abs() < half_goal_width;
-        let goal_yellow = (ball_pos.x as f64) < -half_length
-            && (ball_pos.y as f64).abs() < half_goal_width;
+        let goal_blue =
+            ball_pos.x as f64 > half_length && (ball_pos.y as f64).abs() < half_goal_width;
+        let goal_yellow =
+            (ball_pos.x as f64) < -half_length && (ball_pos.y as f64).abs() < half_goal_width;
 
         WorldState {
             world_id: self.id,
@@ -321,57 +365,77 @@ impl World {
 
     fn extract_robot_states(&self, team: TeamColor) -> Vec<RobotState> {
         let (sims, handles, robot_cfg) = match team {
-            TeamColor::Blue => (&self.blue_sims, &self.physics.blue_robots, &self.config.blue_robots),
-            TeamColor::Yellow => (&self.yellow_sims, &self.physics.yellow_robots, &self.config.yellow_robots),
+            TeamColor::Blue => (
+                &self.blue_sims,
+                &self.physics.blue_robots,
+                &self.config.blue_robots,
+            ),
+            TeamColor::Yellow => (
+                &self.yellow_sims,
+                &self.physics.yellow_robots,
+                &self.config.yellow_robots,
+            ),
         };
 
-        sims.iter().zip(handles.iter()).map(|(sim, handle)| {
-            let pos = self.physics.get_body_position(handle.chassis_body);
-            let vel = self.physics.get_body_linvel(handle.chassis_body);
-            let angvel = self.physics.get_body_angvel(handle.chassis_body);
-            let yaw = self.physics.get_body_yaw(handle.chassis_body);
+        sims.iter()
+            .zip(handles.iter())
+            .map(|(sim, handle)| {
+                let pos = self.physics.get_body_position(handle.chassis_body);
+                let vel = self.physics.get_body_linvel(handle.chassis_body);
+                let angvel = self.physics.get_body_angvel(handle.chassis_body);
+                let yaw = self.physics.get_body_yaw(handle.chassis_body);
 
-            // Check infrared (ball near kicker)
-            let ball_pos = self.physics.get_body_position(self.physics.ball_body);
-            let kicker_pos = self.physics.get_body_position(handle.kicker_body);
-            let dir = [yaw.cos() as f64, yaw.sin() as f64];
-            let infrared = is_ball_touching_kicker(
-                [ball_pos.x as f64, ball_pos.y as f64, ball_pos.z as f64],
-                [kicker_pos.x as f64, kicker_pos.y as f64, kicker_pos.z as f64],
-                dir,
-                robot_cfg.kicker_thickness,
-                robot_cfg.kicker_width,
-                robot_cfg.kicker_height,
-                self.config.ball.radius,
-            );
+                // Check infrared (ball near kicker)
+                let ball_pos = self.physics.get_body_position(self.physics.ball_body);
+                let kicker_pos = self.physics.get_body_position(handle.kicker_body);
+                let dir = [yaw.cos() as f64, yaw.sin() as f64];
+                let infrared = is_ball_touching_kicker(
+                    [ball_pos.x as f64, ball_pos.y as f64, ball_pos.z as f64],
+                    [
+                        kicker_pos.x as f64,
+                        kicker_pos.y as f64,
+                        kicker_pos.z as f64,
+                    ],
+                    dir,
+                    robot_cfg.kicker_thickness,
+                    robot_cfg.kicker_width,
+                    robot_cfg.kicker_height,
+                    self.config.ball.radius,
+                );
 
-            let kick_status = match sim.kick_type {
-                KickType::None => KickStatus::NoKick,
-                KickType::Flat => KickStatus::FlatKick,
-                KickType::Chip => KickStatus::ChipKick,
-            };
+                let kick_status = match sim.kick_type {
+                    KickType::None => KickStatus::NoKick,
+                    KickType::Flat => KickStatus::FlatKick,
+                    KickType::Chip => KickStatus::ChipKick,
+                };
 
-            RobotState {
-                id: sim.id,
-                team,
-                x: pos.x as f64,
-                y: pos.y as f64,
-                z: pos.z as f64,
-                orientation: yaw as f64,
-                vx: vel.x as f64,
-                vy: vel.y as f64,
-                vz: vel.z as f64,
-                v_angular: angvel.z as f64,
-                infrared,
-                kick_status,
-                is_on: sim.is_on,
-                wheel_speeds: sim.wheel_speeds,
-            }
-        }).collect()
+                RobotState {
+                    id: sim.id,
+                    team,
+                    x: pos.x as f64,
+                    y: pos.y as f64,
+                    z: pos.z as f64,
+                    orientation: yaw as f64,
+                    vx: vel.x as f64,
+                    vy: vel.y as f64,
+                    vz: vel.z as f64,
+                    v_angular: angvel.z as f64,
+                    infrared,
+                    kick_status,
+                    is_on: sim.is_on,
+                    wheel_speeds: sim.wheel_speeds,
+                }
+            })
+            .collect()
     }
 
     /// Reset the world to initial state.
     pub fn reset(&mut self) {
         *self = World::new(self.id, self.config.clone());
+    }
+
+    /// Rebuild the world with a new configuration.
+    pub fn reconfigure(&mut self, config: WorldConfig) {
+        *self = World::new(self.id, config);
     }
 }

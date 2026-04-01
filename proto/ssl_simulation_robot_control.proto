@@ -1,0 +1,41 @@
+syntax = "proto2";
+option go_package = "github.com/RoboCup-SSL/ssl-simulation-protocol/pkg/sim";
+
+message RobotCommand {
+    required uint32 id = 1;
+    optional RobotMoveCommand move_command = 2;
+    optional float kick_speed = 3;
+    optional float kick_angle = 4 [default = 0];
+    optional float dribbler_speed = 5;
+}
+
+message RobotMoveCommand {
+    oneof command {
+        MoveWheelVelocity wheel_velocity = 1;
+        MoveLocalVelocity local_velocity = 2;
+        MoveGlobalVelocity global_velocity = 3;
+    }
+}
+
+message MoveWheelVelocity {
+    required float front_right = 1;
+    required float back_right = 2;
+    required float back_left = 3;
+    required float front_left = 4;
+}
+
+message MoveLocalVelocity {
+    required float forward = 1;
+    required float left = 2;
+    required float angular = 3;
+}
+
+message MoveGlobalVelocity {
+    required float x = 1;
+    required float y = 2;
+    required float angular = 3;
+}
+
+message RobotControl {
+    repeated RobotCommand robot_commands = 1;
+}

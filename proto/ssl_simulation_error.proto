@@ -1,0 +1,7 @@
+syntax = "proto2";
+option go_package = "github.com/RoboCup-SSL/ssl-simulation-protocol/pkg/sim";
+
+message SimulatorError {
+    optional string code = 1;
+    optional string message = 2;
+}

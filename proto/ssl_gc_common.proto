@@ -1,0 +1,19 @@
+syntax = "proto2";
+option go_package = "github.com/RoboCup-SSL/ssl-simulation-protocol/pkg/sim";
+
+enum Team {
+    UNKNOWN = 0;
+    YELLOW = 1;
+    BLUE = 2;
+}
+
+message RobotId {
+    optional uint32 id = 1;
+    optional Team team = 2;
+}
+
+enum Division {
+    DIV_UNKNOWN = 0;
+    DIV_A = 1;
+    DIV_B = 2;
+}

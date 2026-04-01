@@ -3,8 +3,8 @@
 //! Supports headless mode for training and a debug viewer mode.
 
 use robocup_sim::{
-    SimulationEngine, WorldConfig, WorldCommand, RobotCommand, MoveCommand,
-    domain_randomization::RandomizationConfig,
+    domain_randomization::RandomizationConfig, GrSimCompatConfig, GrSimCompatServer, MoveCommand,
+    RobotCommand, SimulationEngine, WorldCommand, WorldConfig,
 };
 use std::time::Instant;
 
@@ -12,13 +12,10 @@ fn main() {
     env_logger::init();
 
     let args: Vec<String> = std::env::args().collect();
-    let num_worlds: usize = args.get(1)
-        .and_then(|s| s.parse().ok())
-        .unwrap_or(64);
-    let num_steps: usize = args.get(2)
-        .and_then(|s| s.parse().ok())
-        .unwrap_or(1000);
+    let num_worlds: usize = args.get(1).and_then(|s| s.parse().ok()).unwrap_or(64);
+    let num_steps: usize = args.get(2).and_then(|s| s.parse().ok()).unwrap_or(1000);
     let randomize = args.iter().any(|a| a == "--randomize");
+    let grsim_api = args.iter().any(|a| a == "--grsim-api");
 
     println!("RoboCup SSL Simulator (Rust)");
     println!("  Worlds: {num_worlds}");
@@ -36,6 +33,24 @@ fn main() {
     };
     let init_time = start.elapsed();
     println!("Initialization: {init_time:.2?}");
+
+    if grsim_api {
+        let mut server = GrSimCompatServer::bind(GrSimCompatConfig::default())
+            .expect("failed to bind grSim compatibility sockets");
+        println!("grSim compatibility API enabled");
+        println!("  Legacy command port: 20011");
+        println!("  Simulation control: 10300");
+        println!("  Blue robot control:  10301");
+        println!("  Yellow robot control: 10302");
+        println!("  Vision multicast: 224.5.23.2:10020");
+        println!();
+
+        loop {
+            server
+                .step(&mut engine)
+                .expect("grSim compatibility server step failed");
+        }
+    }
 
     // Create a simple command: all blue robots drive forward
     let command = WorldCommand {
@@ -64,9 +79,7 @@ fn main() {
             let s = &states[0];
             println!(
                 "Step {step:>5}: ball=({:.3}, {:.3}, {:.3}) blue[0]=({:.3}, {:.3}) frame={}",
-                s.ball.x, s.ball.y, s.ball.z,
-                s.blue_robots[0].x, s.blue_robots[0].y,
-                s.frame,
+                s.ball.x, s.ball.y, s.ball.z, s.blue_robots[0].x, s.blue_robots[0].y, s.frame,
             );
         }
     }

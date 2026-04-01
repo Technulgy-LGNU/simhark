@@ -1,0 +1,43 @@
+syntax = "proto2";
+option go_package = "github.com/RoboCup-SSL/ssl-simulation-protocol/pkg/sim";
+
+import "ssl_gc_common.proto";
+import "ssl_simulation_config.proto";
+import "ssl_simulation_error.proto";
+
+message TeleportBall {
+    optional float x = 1;
+    optional float y = 2;
+    optional float z = 3;
+    optional float vx = 4;
+    optional float vy = 5;
+    optional float vz = 6;
+    optional bool teleport_safely = 7 [default = false];
+    optional bool roll = 8 [default = false];
+}
+
+message TeleportRobot {
+    required RobotId id = 1;
+    optional float x = 2;
+    optional float y = 3;
+    optional float orientation = 4;
+    optional float v_x = 5 [default = 0];
+    optional float v_y = 6 [default = 0];
+    optional float v_angular = 7 [default = 0];
+    optional bool present = 8;
+}
+
+message SimulatorControl {
+    optional TeleportBall teleport_ball = 1;
+    repeated TeleportRobot teleport_robot = 2;
+    optional float simulation_speed = 3;
+}
+
+message SimulatorCommand {
+    optional SimulatorControl control = 1;
+    optional SimulatorConfig config = 2;
+}
+
+message SimulatorResponse {
+    repeated SimulatorError errors = 1;
+}

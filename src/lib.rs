@@ -32,6 +32,8 @@ pub mod engine;
 pub mod command;
 pub mod state;
 pub mod domain_randomization;
+pub mod proto;
+pub mod grsim;
 
 // Re-export main types
 pub use config::{WorldConfig, RobotConfig, BallConfig, FieldConfig};
@@ -40,3 +42,4 @@ pub use command::{RobotCommand, TeamCommand, WorldCommand, MoveCommand, Teleport
 pub use state::{WorldState, RobotState, BallState, TeamColor};
 pub use world::World;
 pub use domain_randomization::{DomainRandomizer, RandomizationConfig};
+pub use grsim::{GrSimCompatConfig, GrSimCompatServer};

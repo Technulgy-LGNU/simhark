@@ -1,0 +1,46 @@
+syntax = "proto2";
+option go_package = "github.com/RoboCup-SSL/ssl-simulation-protocol/pkg/sim";
+
+import "ssl_gc_common.proto";
+import "ssl_vision_geometry.proto";
+import "google/protobuf/any.proto";
+
+message RobotLimits {
+    optional float acc_speedup_absolute_max = 1;
+    optional float acc_speedup_angular_max = 2;
+    optional float acc_brake_absolute_max = 3;
+    optional float acc_brake_angular_max = 4;
+    optional float vel_absolute_max = 5;
+    optional float vel_angular_max = 6;
+}
+
+message RobotWheelAngles {
+    required float front_right = 1;
+    required float back_right = 2;
+    required float back_left = 3;
+    required float front_left = 4;
+}
+
+message RobotSpecs {
+    required RobotId id = 1;
+    optional float radius = 2 [default = 0.09];
+    optional float height = 3 [default = 0.15];
+    optional float mass = 4;
+    optional float max_linear_kick_speed = 7;
+    optional float max_chip_kick_speed = 8;
+    optional float center_to_dribbler = 9;
+    optional RobotLimits limits = 10;
+    optional RobotWheelAngles wheel_angles = 13;
+    optional google.protobuf.Any custom = 14;
+}
+
+message RealismConfig {
+    optional google.protobuf.Any custom = 1;
+}
+
+message SimulatorConfig {
+    optional SSL_GeometryData geometry = 1;
+    repeated RobotSpecs robot_specs = 2;
+    optional RealismConfig realism_config = 3;
+    optional uint32 vision_port = 4;
+}
