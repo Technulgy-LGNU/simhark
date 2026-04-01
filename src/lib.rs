@@ -34,6 +34,8 @@ pub mod state;
 pub mod domain_randomization;
 pub mod proto;
 pub mod grsim;
+#[cfg(feature = "viewer")]
+pub mod viewer;
 
 // Re-export main types
 pub use config::{WorldConfig, RobotConfig, BallConfig, FieldConfig};
