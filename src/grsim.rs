@@ -13,11 +13,11 @@ use crate::command::{
 use crate::config::{FieldConfig, RobotConfig, WorldConfig};
 use crate::engine::SimulationEngine;
 use crate::proto::{
-    robot_move_command, GrSimCommands, GrSimPacket, GrSimReplacement, GrSimRobotCommand,
-    RobotControl, RobotControlResponse, RobotFeedback, RobotLimits, RobotSpecs, RobotStatus,
-    RobotsStatus, SimulatorCommand, SimulatorError, SimulatorResponse, SslDetectionBall,
-    SslDetectionFrame, SslDetectionRobot, SslFieldCircularArc, SslFieldLineSegment,
-    SslGeometryData, SslGeometryFieldSize, SslWrapperPacket, Team,
+    GrSimCommands, GrSimPacket, GrSimReplacement, GrSimRobotCommand, RobotControl,
+    RobotControlResponse, RobotFeedback, RobotLimits, RobotSpecs, RobotStatus, RobotsStatus,
+    SimulatorCommand, SimulatorError, SimulatorResponse, SslDetectionBall, SslDetectionFrame,
+    SslDetectionRobot, SslFieldCircularArc, SslFieldLineSegment, SslGeometryData,
+    SslGeometryFieldSize, SslWrapperPacket, Team, robot_move_command,
 };
 use crate::state::{KickStatus, TeamColor, WorldState};
 

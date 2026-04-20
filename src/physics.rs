@@ -8,7 +8,7 @@
 use nalgebra::{Isometry3, Point3, SMatrix, SVector, Unit, UnitQuaternion, Vector3 as NVec3};
 use rapier3d::prelude::*;
 
-use crate::config::{RobotConfig, WorldConfig, BALL_COLLISION_SUBSTEPS, WALL_COUNT, WHEEL_COUNT};
+use crate::config::{BALL_COLLISION_SUBSTEPS, RobotConfig, WALL_COUNT, WHEEL_COUNT, WorldConfig};
 use crate::geometry::deg2rad;
 
 /// Handle indices for one robot in the physics world.

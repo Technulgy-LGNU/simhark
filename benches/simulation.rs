@@ -1,6 +1,6 @@
 //! Benchmarks for parallel simulation throughput.
 
-use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion};
+use criterion::{BenchmarkId, Criterion, criterion_group, criterion_main};
 use simhark::command::*;
 use simhark::domain_randomization::*;
 use simhark::*;

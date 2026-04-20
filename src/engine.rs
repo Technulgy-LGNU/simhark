@@ -4,6 +4,7 @@ use rayon::prelude::*;
 
 use crate::command::WorldCommand;
 use crate::config::WorldConfig;
+use crate::controller::ControlledTeams;
 use crate::domain_randomization::{DomainRandomizer, RandomizationConfig};
 use crate::state::WorldState;
 use crate::world::World;
@@ -136,6 +137,34 @@ impl SimulationEngine {
             .par_iter()
             .map(|world| world.get_state())
             .collect()
+    }
+
+    pub fn rollout_with_controllers(
+        &mut self,
+        controllers: &mut [ControlledTeams],
+        steps: usize,
+    ) -> Vec<Vec<WorldState>> {
+        assert_eq!(controllers.len(), self.worlds.len());
+        for controller in controllers.iter_mut() {
+            controller.reset();
+        }
+
+        let mut trajectories = Vec::with_capacity(steps + 1);
+        let mut states = self.get_all_states();
+        trajectories.push(states.clone());
+        for _ in 0..steps {
+            let commands = controllers
+                .iter_mut()
+                .zip(states.iter())
+                .enumerate()
+                .map(|(world_index, (controller, state))| {
+                    controller.build_command(world_index, state)
+                })
+                .collect::<Vec<_>>();
+            states = self.step_with_commands(&commands);
+            trajectories.push(states.clone());
+        }
+        trajectories
     }
 
     /// Get a mutable reference to a specific world.

@@ -3,9 +3,9 @@
 //! Supports headless mode for training and a debug viewer mode.
 
 use simhark::{
-    domain_randomization::RandomizationConfig, GrSimCompatConfig, GrSimCompatServer, MoveCommand,
-    RobotCommand, SimulationEngine, TeamColor, TeleportBall, TeleportRobot, WorldCommand,
-    WorldConfig,
+    GrSimCompatConfig, GrSimCompatServer, MoveCommand, RobotCommand, SimulationEngine, TeamColor,
+    TeleportBall, TeleportRobot, WorldCommand, WorldConfig,
+    domain_randomization::RandomizationConfig,
 };
 use std::time::Instant;
 

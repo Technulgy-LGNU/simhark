@@ -3,10 +3,10 @@
 use rapier3d::prelude::Vector;
 
 use crate::command::{MoveCommand, RobotCommand, TeleportBall, TeleportRobot, WorldCommand};
-use crate::config::{WorldConfig, BALL_COLLISION_SUBSTEPS};
+use crate::config::{BALL_COLLISION_SUBSTEPS, WorldConfig};
 use crate::geometry::deg2rad;
 use crate::physics::PhysicsWorld;
-use crate::robot::{is_ball_touching_kicker, KickType, RobotSim};
+use crate::robot::{KickType, RobotSim, is_ball_touching_kicker};
 use crate::state::{BallState, KickStatus, RobotState, TeamColor, WorldState};
 
 /// A single simulation world with its own physics and robot state.

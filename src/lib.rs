@@ -23,25 +23,29 @@
 //! let states = engine.step_all();
 //! ```
 
-pub mod config;
-pub mod geometry;
-pub mod physics;
-pub mod robot;
-pub mod world;
-pub mod engine;
 pub mod command;
-pub mod state;
+pub mod config;
+pub mod controller;
 pub mod domain_randomization;
-pub mod proto;
+pub mod engine;
+pub mod geometry;
 pub mod grsim;
+pub mod physics;
+pub mod proto;
+pub mod robot;
+pub mod state;
 #[cfg(feature = "viewer")]
 pub mod viewer;
+pub mod world;
 
 // Re-export main types
-pub use config::{WorldConfig, RobotConfig, BallConfig, FieldConfig};
-pub use engine::SimulationEngine;
-pub use command::{RobotCommand, TeamCommand, WorldCommand, MoveCommand, TeleportBall, TeleportRobot};
-pub use state::{WorldState, RobotState, BallState, TeamColor};
-pub use world::World;
+pub use command::{
+    MoveCommand, RobotCommand, TeamCommand, TeleportBall, TeleportRobot, WorldCommand,
+};
+pub use config::{BallConfig, FieldConfig, RobotConfig, WorldConfig};
+pub use controller::{ControlledTeams, FnTeamController, NoopController, TeamController};
 pub use domain_randomization::{DomainRandomizer, RandomizationConfig};
+pub use engine::SimulationEngine;
 pub use grsim::{GrSimCompatConfig, GrSimCompatServer};
+pub use state::{BallState, RobotState, TeamColor, WorldState};
+pub use world::World;

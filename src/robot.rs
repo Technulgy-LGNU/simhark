@@ -96,7 +96,11 @@ impl RobotSim {
         // Apply acceleration limits (linear)
         let target_v = (vx * vx + vy * vy).sqrt();
         let a = (target_v - current_speed) / dt / 2.0;
-        let a_limit = if a > 0.0 { self.acc_speedup_abs } else { self.acc_brake_abs };
+        let a_limit = if a > 0.0 {
+            self.acc_speedup_abs
+        } else {
+            self.acc_brake_abs
+        };
         if a.abs() > a_limit {
             let clamped_a = a.signum() * a_limit;
             let new_v = current_speed + clamped_a * dt * 2.0;
@@ -109,7 +113,11 @@ impl RobotSim {
 
         // Apply acceleration limits (angular)
         let aw = (vw - current_angvel) / dt / 2.0;
-        let aw_limit = if aw > 0.0 { self.acc_speedup_ang } else { self.acc_brake_ang };
+        let aw_limit = if aw > 0.0 {
+            self.acc_speedup_ang
+        } else {
+            self.acc_brake_ang
+        };
         if aw.abs() > aw_limit {
             let clamped_aw = aw.signum() * aw_limit;
             vw = current_angvel + clamped_aw * dt * 2.0;
@@ -181,7 +189,5 @@ pub fn is_ball_touching_kicker(
     let yy = (-(kx - bx) * dy + (ky - by) * dx).abs();
     let zz = (kicker_pos[2] - bz).abs();
 
-    xx < kicker_thickness * 2.0 + ball_radius
-        && yy < kicker_width * 0.5
-        && zz < kicker_height * 0.5
+    xx < kicker_thickness * 2.0 + ball_radius && yy < kicker_width * 0.5 && zz < kicker_height * 0.5
 }

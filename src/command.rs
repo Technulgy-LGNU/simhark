@@ -14,11 +14,7 @@ pub enum MoveCommand {
         angular: f64,
     },
     /// Global velocity: vx (m/s), vy (m/s), angular (rad/s).
-    GlobalVelocity {
-        vx: f64,
-        vy: f64,
-        angular: f64,
-    },
+    GlobalVelocity { vx: f64, vy: f64, angular: f64 },
     /// Individual wheel speeds in rad/s: [front_right, back_right, back_left, front_left].
     WheelVelocity([f64; 4]),
 }

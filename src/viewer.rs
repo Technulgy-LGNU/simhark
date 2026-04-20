@@ -2,15 +2,15 @@
 
 use std::io::{Error, Result};
 use std::net::{IpAddr, Ipv4Addr, SocketAddr, TcpListener};
-use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::thread;
 use std::time::Duration;
 
 use parking_lot::Mutex;
 use serde::Serialize;
 use tiny_http::{Header, Method, Response, Server, StatusCode};
-use tungstenite::{accept, Message};
+use tungstenite::{Message, accept};
 
 use crate::config::{FieldConfig, WorldConfig};
 use crate::state::WorldState;

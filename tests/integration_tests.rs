@@ -3,11 +3,11 @@
 //! These tests verify behavioral correctness matching grSim, determinism
 //! across parallel worlds, and physics consistency.
 
-use simhark::*;
 use simhark::command::*;
 use simhark::config::*;
-use simhark::state::*;
 use simhark::domain_randomization::*;
+use simhark::state::*;
+use simhark::*;
 
 // ============================================================================
 // World creation and initial state
@@ -39,10 +39,18 @@ fn test_world_initial_robots_on_correct_halves() {
     let state = world.get_state();
 
     for r in &state.blue_robots {
-        assert!(r.x < 0.0, "blue robots should start on negative x half, got {}", r.x);
+        assert!(
+            r.x < 0.0,
+            "blue robots should start on negative x half, got {}",
+            r.x
+        );
     }
     for r in &state.yellow_robots {
-        assert!(r.x > 0.0, "yellow robots should start on positive x half, got {}", r.x);
+        assert!(
+            r.x > 0.0,
+            "yellow robots should start on positive x half, got {}",
+            r.x
+        );
     }
 }
 
@@ -188,8 +196,16 @@ fn test_ball_stationary_stays_put() {
     }
 
     let state = world.get_state();
-    assert!((state.ball.x - 1.0).abs() < 0.05, "stationary ball should stay at x=1.0, got {}", state.ball.x);
-    assert!((state.ball.y - 1.0).abs() < 0.05, "stationary ball should stay at y=1.0, got {}", state.ball.y);
+    assert!(
+        (state.ball.x - 1.0).abs() < 0.05,
+        "stationary ball should stay at x=1.0, got {}",
+        state.ball.x
+    );
+    assert!(
+        (state.ball.y - 1.0).abs() < 0.05,
+        "stationary ball should stay at y=1.0, got {}",
+        state.ball.y
+    );
 }
 
 // ============================================================================
@@ -226,7 +242,8 @@ fn test_robot_moves_forward() {
     let state = world.get_state();
     // Robot should have moved (exact direction depends on initial orientation)
     let dist = ((state.blue_robots[0].x - initial_state.blue_robots[0].x).powi(2)
-        + (state.blue_robots[0].y - initial_state.blue_robots[0].y).powi(2)).sqrt();
+        + (state.blue_robots[0].y - initial_state.blue_robots[0].y).powi(2))
+    .sqrt();
     // Even if motor coupling isn't perfect, the robot should move at least a tiny amount
     // due to joint forces
     assert!(
@@ -263,7 +280,8 @@ fn test_wheel_speed_command() {
     let dist = ((state.blue_robots[0].x - initial_pos.0).powi(2)
         + (state.blue_robots[0].y - initial_pos.1).powi(2))
     .sqrt();
-    let angle_changed = (state.blue_robots[0].orientation - initial.blue_robots[0].orientation).abs() > 0.001;
+    let angle_changed =
+        (state.blue_robots[0].orientation - initial.blue_robots[0].orientation).abs() > 0.001;
     assert!(
         dist > 0.001 || angle_changed,
         "robot should have moved or rotated with wheel commands, dist={dist}, angle_change={}",
@@ -297,7 +315,10 @@ fn test_noop_command_robot_stays() {
     let dist = ((after.blue_robots[0].x - pos_before.0).powi(2)
         + (after.blue_robots[0].y - pos_before.1).powi(2))
     .sqrt();
-    assert!(dist < 2.0, "robot with noop should not move far after settling, dist={dist}");
+    assert!(
+        dist < 2.0,
+        "robot with noop should not move far after settling, dist={dist}"
+    );
 }
 
 // ============================================================================
@@ -321,8 +342,16 @@ fn test_teleport_ball() {
     });
 
     let state = world.get_state();
-    assert!((state.ball.x - 2.5).abs() < 0.1, "ball should be at x=2.5, got {}", state.ball.x);
-    assert!((state.ball.y - (-1.0)).abs() < 0.1, "ball should be at y=-1.0, got {}", state.ball.y);
+    assert!(
+        (state.ball.x - 2.5).abs() < 0.1,
+        "ball should be at x=2.5, got {}",
+        state.ball.x
+    );
+    assert!(
+        (state.ball.y - (-1.0)).abs() < 0.1,
+        "ball should be at y=-1.0, got {}",
+        state.ball.y
+    );
 }
 
 #[test]
@@ -347,8 +376,16 @@ fn test_teleport_robot() {
     let state = world.get_state();
     // After teleport + one physics step, position should be near the target
     // Allow larger tolerance since physics runs after teleport
-    assert!((state.blue_robots[0].x - 1.0).abs() < 1.0, "robot x should be near 1.0, got {}", state.blue_robots[0].x);
-    assert!((state.blue_robots[0].y - 2.0).abs() < 1.0, "robot y should be near 2.0, got {}", state.blue_robots[0].y);
+    assert!(
+        (state.blue_robots[0].x - 1.0).abs() < 1.0,
+        "robot x should be near 1.0, got {}",
+        state.blue_robots[0].x
+    );
+    assert!(
+        (state.blue_robots[0].y - 2.0).abs() < 1.0,
+        "robot y should be near 2.0, got {}",
+        state.blue_robots[0].y
+    );
 }
 
 #[test]
@@ -399,7 +436,10 @@ fn test_goal_detection_blue_scores() {
     });
 
     let state = world.get_state();
-    assert!(state.goal_blue, "should detect blue goal (ball past +x goal line)");
+    assert!(
+        state.goal_blue,
+        "should detect blue goal (ball past +x goal line)"
+    );
     assert!(!state.goal_yellow);
 }
 
@@ -440,8 +480,14 @@ fn test_single_world_deterministic() {
     }
     let state2 = world2.get_state();
 
-    assert_eq!(state1.ball.x, state2.ball.x, "ball x should be deterministic");
-    assert_eq!(state1.ball.y, state2.ball.y, "ball y should be deterministic");
+    assert_eq!(
+        state1.ball.x, state2.ball.x,
+        "ball x should be deterministic"
+    );
+    assert_eq!(
+        state1.ball.y, state2.ball.y,
+        "ball y should be deterministic"
+    );
     assert_eq!(
         state1.blue_robots[0].x, state2.blue_robots[0].x,
         "robot x should be deterministic"
@@ -576,11 +622,7 @@ fn test_engine_reset_specific_worlds() {
 #[test]
 fn test_randomized_worlds_diverge() {
     let config = WorldConfig::division_a();
-    let mut engine = SimulationEngine::new_randomized(
-        4,
-        config,
-        RandomizationConfig::moderate(),
-    );
+    let mut engine = SimulationEngine::new_randomized(4, config, RandomizationConfig::moderate());
 
     for _ in 0..60 {
         engine.step_all();
@@ -589,14 +631,16 @@ fn test_randomized_worlds_diverge() {
     let states = engine.get_all_states();
     // With randomization, worlds should diverge
     let all_same = states.windows(2).all(|w| {
-        (w[0].ball.x - w[1].ball.x).abs() < 1e-10
-            && (w[0].ball.y - w[1].ball.y).abs() < 1e-10
+        (w[0].ball.x - w[1].ball.x).abs() < 1e-10 && (w[0].ball.y - w[1].ball.y).abs() < 1e-10
     });
     // They can still be very similar if ball doesn't move much, but configs differ
     let configs_differ = engine.worlds.iter().enumerate().any(|(i, w)| {
         i > 0 && (w.config.ball.mass - engine.worlds[0].config.ball.mass).abs() > 1e-10
     });
-    assert!(configs_differ, "randomized worlds should have different configs");
+    assert!(
+        configs_differ,
+        "randomized worlds should have different configs"
+    );
 }
 
 // ============================================================================
@@ -613,7 +657,11 @@ fn test_velocity_limit_in_command() {
     sim.set_local_velocity(100.0, 0.0, 0.0, 0.0, 0.0, 1.0 / 60.0);
 
     // Wheel speeds should be bounded by the vel_absolute_max -> wheel conversion
-    let max_wheel = sim.wheel_speeds.iter().map(|s| s.abs()).fold(0.0_f64, f64::max);
+    let max_wheel = sim
+        .wheel_speeds
+        .iter()
+        .map(|s| s.abs())
+        .fold(0.0_f64, f64::max);
     // With vel_absolute_max = 5.0, wheel speeds should be reasonable
     // The exact value depends on the inverse kinematics, but shouldn't be enormous
     assert!(
