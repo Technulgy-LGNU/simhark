@@ -24,6 +24,9 @@ pub struct RandomizationConfig {
     // Robot
     pub robot_mass: f64,
     pub robot_radius: f64,
+    pub wheel_radius: f64,
+    pub wheel_mass: f64,
+    pub kicker_mass: f64,
     pub wheel_friction: f64,
     pub wheel_motor_fmax: f64,
     pub kicker_damp_factor: f64,
@@ -33,6 +36,7 @@ pub struct RandomizationConfig {
 
     // World
     pub gravity: f64,
+    pub time_step: f64,
 }
 
 impl Default for RandomizationConfig {
@@ -45,6 +49,9 @@ impl Default for RandomizationConfig {
             ball_damping: 0.0,
             robot_mass: 0.0,
             robot_radius: 0.0,
+            wheel_radius: 0.0,
+            wheel_mass: 0.0,
+            kicker_mass: 0.0,
             wheel_friction: 0.0,
             wheel_motor_fmax: 0.0,
             kicker_damp_factor: 0.0,
@@ -52,6 +59,7 @@ impl Default for RandomizationConfig {
             acc_limits: 0.0,
             vel_limits: 0.0,
             gravity: 0.0,
+            time_step: 0.0,
         }
     }
 }
@@ -67,6 +75,9 @@ impl RandomizationConfig {
             ball_damping: 0.2,
             robot_mass: 0.05,
             robot_radius: 0.01,
+            wheel_radius: 0.01,
+            wheel_mass: 0.05,
+            kicker_mass: 0.05,
             wheel_friction: 0.15,
             wheel_motor_fmax: 0.1,
             kicker_damp_factor: 0.1,
@@ -74,6 +85,7 @@ impl RandomizationConfig {
             acc_limits: 0.1,
             vel_limits: 0.05,
             gravity: 0.005,
+            time_step: 0.02,
         }
     }
 
@@ -87,6 +99,9 @@ impl RandomizationConfig {
             ball_damping: 0.4,
             robot_mass: 0.15,
             robot_radius: 0.03,
+            wheel_radius: 0.03,
+            wheel_mass: 0.15,
+            kicker_mass: 0.15,
             wheel_friction: 0.3,
             wheel_motor_fmax: 0.2,
             kicker_damp_factor: 0.2,
@@ -94,6 +109,7 @@ impl RandomizationConfig {
             acc_limits: 0.2,
             vel_limits: 0.1,
             gravity: 0.01,
+            time_step: 0.05,
         }
     }
 }
@@ -135,6 +151,7 @@ impl DomainRandomizer {
 
         // Physics
         config.physics.gravity = mutate(&mut rng, config.physics.gravity, r.gravity);
+        config.physics.delta_time = mutate(&mut rng, config.physics.delta_time, r.time_step);
 
         // Update seed so this world is still deterministic but different
         config.seed = base.seed.wrapping_add(world_index as u64);
@@ -150,6 +167,9 @@ fn randomize_robot_config(
 ) {
     cfg.body_mass = mutate(rng, cfg.body_mass, r.robot_mass);
     cfg.radius = mutate(rng, cfg.radius, r.robot_radius);
+    cfg.wheel_radius = mutate(rng, cfg.wheel_radius, r.wheel_radius);
+    cfg.wheel_mass = mutate(rng, cfg.wheel_mass, r.wheel_mass);
+    cfg.kicker_mass = mutate(rng, cfg.kicker_mass, r.kicker_mass);
     cfg.wheel_tangent_friction = mutate(rng, cfg.wheel_tangent_friction, r.wheel_friction);
     cfg.wheel_perpendicular_friction =
         mutate(rng, cfg.wheel_perpendicular_friction, r.wheel_friction);
@@ -246,7 +266,27 @@ mod tests {
             assert!(m.ball.radius > 0.0);
             assert!(m.ball.bounce >= 0.0 && m.ball.bounce <= 1.0);
             assert!(m.blue_robots.body_mass > 0.0);
+            assert!(m.blue_robots.wheel_radius > 0.0);
+            assert!(m.blue_robots.wheel_mass > 0.0);
+            assert!(m.blue_robots.kicker_mass > 0.0);
             assert!(m.physics.gravity > 0.0);
+            assert!(m.physics.delta_time > 0.0);
         }
+    }
+
+    #[test]
+    fn test_randomization_touches_new_surfaces() {
+        let base = WorldConfig::division_a();
+        let randomizer = DomainRandomizer::new(RandomizationConfig::aggressive());
+        let mutated = randomizer.randomize(&base, 3);
+
+        let any_different = base.blue_robots.wheel_radius != mutated.blue_robots.wheel_radius
+            || base.blue_robots.wheel_mass != mutated.blue_robots.wheel_mass
+            || base.blue_robots.kicker_mass != mutated.blue_robots.kicker_mass
+            || base.physics.delta_time != mutated.physics.delta_time;
+        assert!(
+            any_different,
+            "aggressive randomization should cover wheel, kicker, and time-step surfaces"
+        );
     }
 }
