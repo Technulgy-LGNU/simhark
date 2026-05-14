@@ -11,11 +11,82 @@ use rapier3d::prelude::*;
 use crate::config::{BALL_COLLISION_SUBSTEPS, RobotConfig, WALL_COUNT, WHEEL_COUNT, WorldConfig};
 use crate::geometry::deg2rad;
 
+// Collision group bits, mirroring grSim's per-surface collision setup.
+//
+// In grSim, each pair of geoms must have a `PSurface` created for them to
+// generate contacts. Rapier instead uses bitmask filters: a contact is
+// generated when both colliders' membership intersects the other's filter.
+//
+// Layout:
+//   - BALL: the soccer ball
+//   - CHASSIS: each robot's visible cylinder body
+//   - DUMMY: small invisible sphere at robot center used as the ball-collision
+//     proxy (so the ball can slip past the cylinder edges into the kicker mouth)
+//   - KICKER: each robot's kicker box
+//   - WORLD: walls and ground plane
+const GROUP_BALL: Group = Group::GROUP_1;
+const GROUP_CHASSIS: Group = Group::GROUP_2;
+const GROUP_DUMMY: Group = Group::GROUP_3;
+const GROUP_KICKER: Group = Group::GROUP_4;
+const GROUP_WORLD: Group = Group::GROUP_5;
+
+fn ball_groups() -> InteractionGroups {
+    InteractionGroups::new(
+        GROUP_BALL,
+        GROUP_DUMMY.union(GROUP_KICKER).union(GROUP_WORLD),
+        InteractionTestMode::And,
+    )
+}
+
+fn chassis_groups() -> InteractionGroups {
+    // Chassis collides with other chassis (robot-robot bumping), kickers
+    // (mouth/back contact between robots), and the world. Own-kicker
+    // contacts are filtered out via the kicker joint having
+    // `contacts_enabled(false)`.
+    InteractionGroups::new(
+        GROUP_CHASSIS,
+        GROUP_CHASSIS
+            .union(GROUP_KICKER)
+            .union(GROUP_WORLD),
+        InteractionTestMode::And,
+    )
+}
+
+fn dummy_groups() -> InteractionGroups {
+    // Dummies collide with the ball and with other robots' dummies. They are
+    // intentionally inert vs. walls/ground (the chassis handles those).
+    InteractionGroups::new(
+        GROUP_DUMMY,
+        GROUP_BALL.union(GROUP_DUMMY),
+        InteractionTestMode::And,
+    )
+}
+
+fn kicker_groups() -> InteractionGroups {
+    // Kicker collides with the ball and with other robots' chassis (so a
+    // robot's kicker can push another robot's body). Own-chassis contacts
+    // are suppressed by the kicker joint.
+    InteractionGroups::new(
+        GROUP_KICKER,
+        GROUP_BALL.union(GROUP_CHASSIS),
+        InteractionTestMode::And,
+    )
+}
+
+fn world_groups() -> InteractionGroups {
+    InteractionGroups::new(
+        GROUP_WORLD,
+        GROUP_BALL.union(GROUP_CHASSIS),
+        InteractionTestMode::And,
+    )
+}
+
 /// Handle indices for one robot in the physics world.
 #[derive(Debug, Clone)]
 pub struct RobotHandles {
     pub chassis_body: RigidBodyHandle,
     pub chassis_collider: ColliderHandle,
+    pub dummy_collider: ColliderHandle,
     pub kicker_body: RigidBodyHandle,
     pub kicker_collider: ColliderHandle,
     pub kicker_joint: ImpulseJointHandle,
@@ -81,12 +152,39 @@ pub struct PhysicsWorld {
     yellow_drive: DriveKinematics,
     blue_wheel_speeds: Vec<[f32; WHEEL_COUNT]>,
     yellow_wheel_speeds: Vec<[f32; WHEEL_COUNT]>,
+    blue_drive_params: DriveParams,
+    yellow_drive_params: DriveParams,
 
     // Cached config values
     ball_friction: f32,
     ball_mass: f32,
     ball_radius: f32,
     gravity_val: f32,
+}
+
+/// Per-team mass / inertia / acceleration limits used by the
+/// torque-limited velocity controller in `apply_drive_forces`.
+#[derive(Clone, Copy)]
+struct DriveParams {
+    mass: f32,
+    inertia_z: f32,
+    max_force: f32,
+    max_torque: f32,
+}
+
+impl DriveParams {
+    fn from_config(cfg: &RobotConfig) -> Self {
+        let mass = cfg.body_mass as f32;
+        let radius = cfg.radius as f32;
+        // Solid cylinder spinning about its symmetry axis: I = 0.5 m r^2.
+        let inertia_z = 0.5 * mass * radius * radius;
+        Self {
+            mass,
+            inertia_z,
+            max_force: mass * cfg.acc_speedup_absolute_max as f32,
+            max_torque: inertia_z * cfg.acc_speedup_angular_max as f32,
+        }
+    }
 }
 
 impl PhysicsWorld {
@@ -108,6 +206,7 @@ impl PhysicsWorld {
             ColliderBuilder::halfspace(Unit::new_unchecked(Vector::new(0.0, 0.0, 1.0)))
                 .friction(0.5)
                 .restitution(0.0)
+                .collision_groups(world_groups())
                 .build(),
             ground_body,
             &mut rigid_body_set,
@@ -131,6 +230,7 @@ impl PhysicsWorld {
                 .friction(config.ball.friction as f32)
                 .restitution(config.ball.bounce as f32)
                 .restitution_combine_rule(CoefficientCombineRule::Max)
+                .collision_groups(ball_groups())
                 .build(),
             ball_body,
             &mut rigid_body_set,
@@ -192,6 +292,8 @@ impl PhysicsWorld {
             yellow_drive: DriveKinematics::new(&config.yellow_robots),
             blue_wheel_speeds: vec![[0.0; WHEEL_COUNT]; config.robots_per_team],
             yellow_wheel_speeds: vec![[0.0; WHEEL_COUNT]; config.robots_per_team],
+            blue_drive_params: DriveParams::from_config(&config.blue_robots),
+            yellow_drive_params: DriveParams::from_config(&config.yellow_robots),
             ball_friction: config.ball.friction as f32,
             ball_mass: config.ball.mass as f32,
             ball_radius: config.ball.radius as f32,
@@ -227,6 +329,7 @@ impl PhysicsWorld {
                 ColliderBuilder::cuboid(hx as f32 / 2.0, hy as f32 / 2.0, hz as f32 / 2.0)
                     .friction(1.0)
                     .restitution(wall_bounce)
+                    .collision_groups(world_groups())
                     .build(),
                 body,
                 bodies,
@@ -268,54 +371,58 @@ impl PhysicsWorld {
         colliders: &mut ColliderSet,
         impulse_joints: &mut ImpulseJointSet,
     ) -> RobotHandles {
-        // Place robot on the ground (bottom of cylinder at z=0)
-        let z = (robot_cfg.height / 2.0 + 0.001) as f32;
+        // Mirrors grSim: chassis sits with its bottom one wheel-radius above the
+        // ground (the wheels live in this gap, but we don't model them as
+        // separate bodies).
+        let z = robot_cfg.start_z() as f32;
         let rot = UnitQuaternion::from_axis_angle(&NVec3::z_axis(), orientation as f32);
         let chassis_iso = Isometry3::from_parts(NVec3::new(x as f32, y as f32, z).into(), rot);
 
-        // Chassis (cylinder) - the entire robot body
+        // Chassis: a simple cylinder, exactly like grSim's PCylinder. The ball
+        // never sees this cylinder (collision groups exclude it); only other
+        // robots and the world do.
         let chassis_rb = RigidBodyBuilder::dynamic()
             .pose(chassis_iso.into())
             .linear_damping(0.5)
             .angular_damping(1.0)
-            // Lock Z rotation to keep robot upright (only rotate around Z axis for yaw)
             .enabled_rotations(false, false, true)
-            // Lock Z translation to keep on ground plane
-            .lock_translations()
+            // Pin the chassis at start_z so we don't need to model wheels.
+            .enabled_translations(true, true, false)
             .build();
         let chassis_body = bodies.insert(chassis_rb);
-        // Unlock X and Y translations (lock_translations locks all, we only want Z locked)
-        // Actually, let's just use a kinematic approach: lock nothing, but set high damping
-        // Re-do: make it fully dynamic but constrained to ground
-        bodies.remove(
-            chassis_body,
-            &mut IslandManager::new(),
-            colliders,
-            impulse_joints,
-            &mut MultibodyJointSet::new(),
-            true,
-        );
 
-        let chassis_rb = RigidBodyBuilder::dynamic()
-            .pose(chassis_iso.into())
-            .linear_damping(0.5)
-            .angular_damping(1.0)
-            .enabled_rotations(false, false, true)
-            .build();
-        let chassis_body = bodies.insert(chassis_rb);
+        let half_height = robot_cfg.height as f32 / 2.0;
         let chassis_collider = colliders.insert_with_parent(
-            ColliderBuilder::cylinder(robot_cfg.height as f32 / 2.0, robot_cfg.radius as f32)
-                .mass(robot_cfg.body_mass as f32)
+            ColliderBuilder::cylinder(half_height, robot_cfg.radius as f32)
+                .mass(robot_cfg.body_mass as f32 * 0.99)
                 .friction(0.3)
                 .restitution(0.1)
+                .collision_groups(chassis_groups())
                 .build(),
             chassis_body,
             bodies,
         );
 
-        // Kicker (box) - fixed to chassis
+        // Dummy: small invisible sphere at the chassis center, used as the
+        // ball-collision proxy. Sized to `center_from_kicker` so the ball can
+        // slip around its lower hemisphere and reach the kicker mouth (the
+        // dummy bottom sits well above the ball at this radius / start_z).
+        let dummy_collider = colliders.insert_with_parent(
+            ColliderBuilder::ball(robot_cfg.center_from_kicker as f32)
+                .mass(robot_cfg.body_mass as f32 * 0.01)
+                .friction(0.3)
+                .restitution(0.1)
+                .collision_groups(dummy_groups())
+                .build(),
+            chassis_body,
+            bodies,
+        );
+
+        // Kicker: a flat box at the front, joined rigidly to the chassis.
         let kicker_offset_x = robot_cfg.center_from_kicker + robot_cfg.kicker_thickness;
-        let kicker_offset_z = robot_cfg.kicker_z;
+        let kicker_offset_z = -robot_cfg.height * 0.5 + robot_cfg.wheel_radius
+            - robot_cfg.bottom_height
+            + robot_cfg.kicker_z;
         let kicker_local = NVec3::new(kicker_offset_x as f32, 0.0, kicker_offset_z as f32);
         let kicker_world = chassis_iso * Point3::from(kicker_local);
 
@@ -333,19 +440,25 @@ impl PhysicsWorld {
             )
             .mass(robot_cfg.kicker_mass as f32)
             .friction(robot_cfg.kicker_friction as f32)
+            .collision_groups(kicker_groups())
             .build(),
             kicker_body,
             bodies,
         );
 
+        // Suppress contacts between the chassis and its own kicker — the joint
+        // already glues them together, and otherwise their colliders overlap
+        // (the kicker box sits inside the cylinder envelope).
         let kicker_joint = FixedJointBuilder::new()
             .local_anchor1(to_rapier_vec(kicker_local))
-            .local_anchor2(Vector::ZERO);
+            .local_anchor2(Vector::ZERO)
+            .contacts_enabled(false);
         let kicker_joint = impulse_joints.insert(chassis_body, kicker_body, kicker_joint, true);
 
         RobotHandles {
             chassis_body,
             chassis_collider,
+            dummy_collider,
             kicker_body,
             kicker_collider,
             kicker_joint,
@@ -398,54 +511,91 @@ impl PhysicsWorld {
         }
     }
 
-    /// Apply robot velocity directly by setting linear/angular velocity.
-    /// This is the simplified model: instead of wheel motors, we directly
-    /// set the chassis velocity based on the computed wheel kinematics.
-    /// `vx`, `vy` are in the robot's local frame, `vw` is angular velocity.
-    pub fn apply_robot_velocity(&mut self, robot: &RobotHandles, vx: f32, vy: f32, vw: f32) {
-        let body = &self.rigid_body_set[robot.chassis_body];
-        let facing = body.rotation().mul_vec3(Vector::X);
-        let yaw = facing.y.atan2(facing.x);
-
-        // Convert local velocity to world frame
-        let world_vx = vx * yaw.cos() - vy * yaw.sin();
-        let world_vy = vx * yaw.sin() + vy * yaw.cos();
-
-        let body = &mut self.rigid_body_set[robot.chassis_body];
-        body.set_linvel(Vector::new(world_vx, world_vy, body.linvel().z), true);
-        body.set_angvel(Vector::new(0.0, 0.0, vw), true);
-    }
-
-    /// Update one wheel speed and immediately project the full wheel set to chassis motion.
+    /// Update one wheel speed. The actual chassis motion is driven by
+    /// `apply_drive_forces`, which runs once per substep so contact forces
+    /// can resist commanded motion (rather than being wiped out by a
+    /// per-frame `set_linvel`).
     pub fn set_wheel_speed(&mut self, robot: &RobotHandles, wheel_index: usize, speed: f32) {
         if wheel_index >= WHEEL_COUNT {
             return;
         }
-
         if let Some(index) = self
             .blue_robots
             .iter()
             .position(|handles| handles.chassis_body == robot.chassis_body)
         {
             self.blue_wheel_speeds[index][wheel_index] = speed;
-            let wheel_speeds = self.blue_wheel_speeds[index];
-            let (vx, vy, vw) = self.blue_drive.body_velocity(wheel_speeds);
-            let handle = self.blue_robots[index].clone();
-            self.apply_robot_velocity(&handle, vx, vy, vw);
             return;
         }
-
         if let Some(index) = self
             .yellow_robots
             .iter()
             .position(|handles| handles.chassis_body == robot.chassis_body)
         {
             self.yellow_wheel_speeds[index][wheel_index] = speed;
-            let wheel_speeds = self.yellow_wheel_speeds[index];
-            let (vx, vy, vw) = self.yellow_drive.body_velocity(wheel_speeds);
-            let handle = self.yellow_robots[index].clone();
-            self.apply_robot_velocity(&handle, vx, vy, vw);
         }
+    }
+
+    /// Push each robot toward its commanded velocity using force/torque,
+    /// limited to the chassis's max acceleration. Called once per substep.
+    /// This replaces the previous `set_linvel`-every-frame approach, which
+    /// silently discarded contact-resolution forces and let perfectly
+    /// symmetric robot clusters lock the ball in place.
+    pub fn apply_drive_forces(&mut self, dt_substep: f32) {
+        let blue_handles = self.blue_robots.clone();
+        let blue_speeds = self.blue_wheel_speeds.clone();
+        for (handle, speeds) in blue_handles.iter().zip(blue_speeds.iter()) {
+            let (vx, vy, vw) = self.blue_drive.body_velocity(*speeds);
+            self.apply_drive_force(handle, vx, vy, vw, self.blue_drive_params, dt_substep);
+        }
+        let yellow_handles = self.yellow_robots.clone();
+        let yellow_speeds = self.yellow_wheel_speeds.clone();
+        for (handle, speeds) in yellow_handles.iter().zip(yellow_speeds.iter()) {
+            let (vx, vy, vw) = self.yellow_drive.body_velocity(*speeds);
+            self.apply_drive_force(handle, vx, vy, vw, self.yellow_drive_params, dt_substep);
+        }
+    }
+
+    fn apply_drive_force(
+        &mut self,
+        robot: &RobotHandles,
+        target_vx_local: f32,
+        target_vy_local: f32,
+        target_vw: f32,
+        params: DriveParams,
+        dt_substep: f32,
+    ) {
+        let body = &self.rigid_body_set[robot.chassis_body];
+        let facing = body.rotation().mul_vec3(Vector::X);
+        let yaw = facing.y.atan2(facing.x);
+        let target_world_vx = target_vx_local * yaw.cos() - target_vy_local * yaw.sin();
+        let target_world_vy = target_vx_local * yaw.sin() + target_vy_local * yaw.cos();
+        let current_lin = body.linvel();
+        let current_ang = body.angvel().z;
+
+        // F = m * (target_v - current_v) / dt_substep, magnitude-clamped.
+        let dvx = target_world_vx - current_lin.x;
+        let dvy = target_world_vy - current_lin.y;
+        let mut force_x = params.mass * dvx / dt_substep;
+        let mut force_y = params.mass * dvy / dt_substep;
+        let force_mag = (force_x * force_x + force_y * force_y).sqrt();
+        if force_mag > params.max_force {
+            let scale = params.max_force / force_mag;
+            force_x *= scale;
+            force_y *= scale;
+        }
+
+        let dvw = target_vw - current_ang;
+        let raw_torque = params.inertia_z * dvw / dt_substep;
+        let torque_z = raw_torque.clamp(-params.max_torque, params.max_torque);
+
+        let body = &mut self.rigid_body_set[robot.chassis_body];
+        body.add_force(Vector::new(force_x, force_y, 0.0), true);
+        body.add_torque(Vector::new(0.0, 0.0, torque_z), true);
+    }
+
+    pub fn substep_dt(&self) -> f32 {
+        self.integration_parameters.dt
     }
 
     /// Get position of a rigid body.
@@ -490,6 +640,10 @@ impl PhysicsWorld {
         let body = &mut self.rigid_body_set[handle];
         body.set_linvel(Vector::ZERO, true);
         body.set_angvel(Vector::ZERO, true);
+    }
+
+    pub fn ball_mass(&self) -> f32 {
+        self.ball_mass
     }
 }
 
