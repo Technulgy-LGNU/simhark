@@ -201,13 +201,13 @@ impl Default for RobotConfig {
         Self {
             center_from_kicker: 0.073,
             radius: 0.09,
-            height: 0.13,
+            height: 0.147,
             bottom_height: 0.02,
             kicker_z: 0.005,
             kicker_thickness: 0.005,
             kicker_width: 0.08,
             kicker_height: 0.04,
-            wheel_radius: 0.0325,
+            wheel_radius: 0.027,
             wheel_thickness: 0.005,
             wheel_angles: [60.0, 135.0, 225.0, 300.0],
             body_mass: 2.0,
@@ -235,7 +235,7 @@ impl Default for RobotConfig {
 impl RobotConfig {
     /// Compute robot start Z position (same formula as grSim's ROBOT_START_Z macro).
     pub fn start_z(&self) -> f64 {
-        self.height * 0.5 + self.wheel_radius * 1.1 + self.bottom_height
+        self.height * 0.5 + self.wheel_radius
     }
 }
 

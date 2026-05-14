@@ -34,6 +34,7 @@ pub mod physics;
 pub mod proto;
 pub mod robot;
 pub mod state;
+pub mod sumatra;
 #[cfg(feature = "viewer")]
 pub mod viewer;
 pub mod world;
@@ -48,4 +49,5 @@ pub use domain_randomization::{DomainRandomizer, RandomizationConfig};
 pub use engine::SimulationEngine;
 pub use grsim::{GrSimCompatConfig, GrSimCompatServer};
 pub use state::{BallState, RobotState, TeamColor, WorldState};
+pub use sumatra::{SumatraSimNetConfig, SumatraSimNetServer};
 pub use world::World;
