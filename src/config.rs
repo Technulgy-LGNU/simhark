@@ -209,7 +209,7 @@ impl Default for RobotConfig {
             kicker_height: 0.04,
             wheel_radius: 0.027,
             wheel_thickness: 0.005,
-            wheel_angles: [60.0, 135.0, 225.0, 300.0],
+            wheel_angles: [30.0, 150.0, 225.0, 315.0],
             body_mass: 2.0,
             wheel_mass: 0.2,
             kicker_mass: 0.02,

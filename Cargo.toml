@@ -12,6 +12,7 @@ resolver = "2"
 [features]
 default = ["viewer"]
 viewer = ["dep:tiny_http", "dep:tungstenite"]
+motion-audit = []
 
 [lib]
 name = "simhark"

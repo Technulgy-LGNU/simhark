@@ -7,10 +7,12 @@ use referris::{
     AutoRef, Command, FieldGeometry, InputEnvelope, RawDetectionFrame, RefereeSnapshot, Team,
     TeamInfo, TrackedFrame,
 };
+#[cfg(feature = "motion-audit")]
+use simhark::motion_audit::{MotionAuditor, robot_motion_summary};
 use simhark::viewer::{ViewerConfig, ViewerServer};
 use simhark::{
-    RobotState, SimulationEngine, SumatraSimNetConfig, SumatraSimNetServer, TeamColor,
-    WorldConfig, WorldState,
+    RobotState, SimulationEngine, SumatraSimNetConfig, SumatraSimNetServer, TeamColor, WorldConfig,
+    WorldState,
 };
 use simhark_sumatra::{SumatraInstance, SumatraLaunchConfig};
 
@@ -41,6 +43,8 @@ fn main() -> Result<()> {
 
     let start = Instant::now();
     let mut previous_state = None;
+    #[cfg(feature = "motion-audit")]
+    let mut motion_auditor = MotionAuditor::default();
     while start.elapsed() < Duration::from_secs(20) {
         server.step(&mut engine)?;
         let state = engine.world(0).get_state();
@@ -51,7 +55,13 @@ fn main() -> Result<()> {
             println!("referris: {event:?}");
         }
         viewer.publish(&state);
-        log_motion(&state, previous_state.as_ref());
+        log_motion(
+            &state,
+            previous_state.as_ref(),
+            &world.config,
+            #[cfg(feature = "motion-audit")]
+            &mut motion_auditor,
+        );
         previous_state = Some(state.clone());
         if yellow.try_wait()?.is_some() || blue.try_wait()?.is_some() {
             break;
@@ -153,7 +163,12 @@ fn tracked_robot(robot: &simhark::RobotState, team: Team) -> TrackedRobot {
     }
 }
 
-fn log_motion(state: &WorldState, previous_state: Option<&WorldState>) {
+fn log_motion(
+    state: &WorldState,
+    previous_state: Option<&WorldState>,
+    config: &WorldConfig,
+    #[cfg(feature = "motion-audit")] motion_auditor: &mut MotionAuditor,
+) {
     if state.frame % MOTION_LOG_EVERY_FRAMES != 0 {
         return;
     }
@@ -189,7 +204,7 @@ fn log_motion(state: &WorldState, previous_state: Option<&WorldState>) {
         .join(" | ");
 
     println!(
-        "motion t={:.2} frame={} ball pos=({:.3},{:.3},{:.3}) vel=({:.2},{:.2},{:.2}) speed={:.2} step={:.2} disp={:.3}{} nearest=[{}]",
+        "motion t={:.2} frame={} ball pos=({:.3},{:.3},{:.3}) vel=({:.2},{:.2},{:.2}) speed={:.2} step={:.2} disp={:.3}{}{} nearest=[{}]",
         state.sim_time,
         state.frame,
         state.ball.x,
@@ -201,9 +216,34 @@ fn log_motion(state: &WorldState, previous_state: Option<&WorldState>) {
         ball_speed,
         step_speed,
         displacement,
-        if suspicious_jump { " suspicious-jump" } else { "" },
+        if suspicious_jump {
+            " suspicious-jump"
+        } else {
+            ""
+        },
+        wall_summary(state, config),
         nearest_summary,
     );
+
+    #[cfg(feature = "motion-audit")]
+    {
+        let findings = motion_auditor.audit(state, previous_state, config);
+        if !findings.is_empty() {
+            let fastest = state
+                .blue_robots
+                .iter()
+                .chain(state.yellow_robots.iter())
+                .max_by(|left, right| {
+                    speed2(left.vx, left.vy).total_cmp(&speed2(right.vx, right.vy))
+                });
+            if let Some(robot) = fastest {
+                println!("motion-audit fastest={}", robot_motion_summary(robot));
+            }
+            for finding in findings {
+                println!("motion-audit {} {}", finding.kind, finding.detail);
+            }
+        }
+    }
 }
 
 fn nearest_robots(state: &WorldState, count: usize) -> Vec<(&RobotState, f64, f64, f64)> {
@@ -239,4 +279,18 @@ fn speed2(x: f64, y: f64) -> f64 {
 
 fn speed3(x: f64, y: f64, z: f64) -> f64 {
     (x * x + y * y + z * z).sqrt()
+}
+
+fn wall_summary(state: &WorldState, config: &WorldConfig) -> String {
+    let touchline =
+        config.field.field_width * 0.5 + config.field.margin_touch_line - config.ball.radius;
+    let goal_line =
+        config.field.field_length * 0.5 + config.field.margin_goal_line - config.ball.radius;
+    if state.ball.y.abs() >= touchline - 0.03 {
+        return format!(" wall=touchline tangential={:.2}", state.ball.vx);
+    }
+    if state.ball.x.abs() >= goal_line - 0.03 {
+        return format!(" wall=goalline tangential={:.2}", state.ball.vy);
+    }
+    String::new()
 }

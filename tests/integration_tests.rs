@@ -8,6 +8,8 @@ use simhark::config::*;
 use simhark::domain_randomization::*;
 use simhark::state::*;
 use simhark::*;
+use simhark_sumatra::{SumatraInstance, SumatraLaunchConfig};
+use std::time::{Duration, Instant};
 
 // ============================================================================
 // World creation and initial state
@@ -725,6 +727,110 @@ fn test_command_for_nonexistent_robot_ignored() {
 
     // Should not panic
     world.step(&cmd);
+}
+
+#[test]
+#[ignore = "requires built Sumatra checkout"]
+fn test_sumatra_single_team_scores_five_goals() {
+    let mut config = WorldConfig::division_b();
+    config.robots_per_team = 6;
+    let mut engine = SimulationEngine::new(1, config.clone());
+    let mut server = SumatraSimNetServer::bind(SumatraSimNetConfig::default()).unwrap();
+
+    let mut blue = SumatraInstance::spawn(&SumatraLaunchConfig {
+        remote_client: true,
+        ai_blue: true,
+        ai_yellow: false,
+        host: Some("127.0.0.1".to_string()),
+        ..SumatraLaunchConfig::default()
+    })
+    .unwrap();
+
+    let start = Instant::now();
+    let mut goals = 0usize;
+    let mut cooldown = 0u32;
+
+    while start.elapsed() < Duration::from_secs(60) && goals < 5 {
+        let mut commands = WorldCommand::default();
+        commands.teleport_robots = (0..config.robots_per_team)
+            .map(|id| TeleportRobot {
+                id,
+                team: TeamColor::Yellow,
+                x: Some(20.0 + id as f64),
+                y: Some(20.0 + id as f64),
+                orientation: Some(0.0),
+                vx: Some(0.0),
+                vy: Some(0.0),
+                v_angular: Some(0.0),
+                present: Some(false),
+            })
+            .collect();
+
+        let states = server.step_with_local_commands(&mut engine, &[commands]).unwrap();
+        let state = &states[0];
+
+        if cooldown > 0 {
+            cooldown -= 1;
+        }
+
+        if state.goal_blue && cooldown == 0 {
+            goals += 1;
+            cooldown = 30;
+            let reset = WorldCommand {
+                teleport_ball: Some(TeleportBall {
+                    x: Some(0.0),
+                    y: Some(0.0),
+                    z: Some(0.0),
+                    vx: Some(0.0),
+                    vy: Some(0.0),
+                    vz: Some(0.0),
+                }),
+                teleport_robots: (0..config.robots_per_team)
+                    .flat_map(|id| {
+                        [
+                            TeleportRobot {
+                                id,
+                                team: TeamColor::Blue,
+                                x: None,
+                                y: None,
+                                orientation: Some(0.0),
+                                vx: Some(0.0),
+                                vy: Some(0.0),
+                                v_angular: Some(0.0),
+                                present: Some(true),
+                            },
+                            TeleportRobot {
+                                id,
+                                team: TeamColor::Yellow,
+                                x: Some(20.0 + id as f64),
+                                y: Some(20.0 + id as f64),
+                                orientation: Some(0.0),
+                                vx: Some(0.0),
+                                vy: Some(0.0),
+                                v_angular: Some(0.0),
+                                present: Some(false),
+                            },
+                        ]
+                    })
+                    .collect(),
+                ..Default::default()
+            };
+            engine.step_with_commands(&[reset]);
+        }
+
+        if blue.try_wait().unwrap().is_some() {
+            panic!("Sumatra blue process exited before scoring five goals");
+        }
+
+        std::thread::sleep(Duration::from_millis(16));
+    }
+
+    blue.kill().unwrap();
+
+    assert!(
+        goals >= 5,
+        "blue team should score 5 goals against disabled yellow team within the timeout, scored {goals}"
+    );
 }
 
 #[test]

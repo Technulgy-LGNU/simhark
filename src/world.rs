@@ -3,11 +3,17 @@
 use rapier3d::prelude::Vector;
 
 use crate::command::{MoveCommand, RobotCommand, TeleportBall, TeleportRobot, WorldCommand};
-use crate::config::{BALL_COLLISION_SUBSTEPS, WorldConfig};
+use crate::config::{BALL_COLLISION_SUBSTEPS, RobotConfig, WorldConfig};
 use crate::geometry::deg2rad;
 use crate::physics::PhysicsWorld;
 use crate::robot::{KickType, RobotSim, is_ball_touching_kicker};
 use crate::state::{BallState, KickStatus, RobotState, TeamColor, WorldState};
+
+const BALL_CONTACT_TOLERANCE: f64 = 0.02;
+const BALL_HOLD_TOLERANCE: f64 = 0.05;
+const BALL_HOLD_PULL_GAIN: f32 = 180.0;
+const BALL_HOLD_DAMPING_GAIN: f32 = 18.0;
+const BALL_HOLD_MAX_FORCE: f32 = 4.0;
 
 /// A single simulation world with its own physics and robot state.
 pub struct World {
@@ -83,6 +89,7 @@ impl World {
         // overwritten and robot clusters froze rigid around the ball.
         let dt_substep = self.physics.substep_dt();
         for _ in 0..BALL_COLLISION_SUBSTEPS {
+            self.physics.clear_user_forces();
             self.physics.apply_ball_friction();
             self.physics.apply_drive_forces(dt_substep);
             self.apply_dribbler_control();
@@ -142,13 +149,17 @@ impl World {
             }
 
             let handle = &handle_copies[cmd.id];
+            self.physics
+                .set_robot_ball_contact_enabled(handle, sim.kick_countdown <= 0);
 
             sim.dribbler_on = cmd.dribbler_on;
 
             if let Some(ref mc) = cmd.move_command {
                 let linvel = self.physics.get_body_linvel(handle.chassis_body);
                 let angvel = self.physics.get_body_angvel(handle.chassis_body);
-                let current_speed = (linvel.x * linvel.x + linvel.y * linvel.y).sqrt() as f64;
+                let yaw = self.physics.get_body_yaw(handle.chassis_body) as f64;
+                let current_vx = linvel.x as f64 * yaw.cos() + linvel.y as f64 * yaw.sin();
+                let current_vy = -(linvel.x as f64) * yaw.sin() + linvel.y as f64 * yaw.cos();
                 let current_angvel = angvel.z as f64;
 
                 match mc {
@@ -161,20 +172,21 @@ impl World {
                             *forward,
                             *left,
                             *angular,
-                            current_speed,
+                            current_vx,
+                            current_vy,
                             current_angvel,
                             dt,
                         );
                     }
                     MoveCommand::GlobalVelocity { vx, vy, angular } => {
-                        let yaw = self.physics.get_body_yaw(handle.chassis_body) as f64;
                         let local_vx = vx * (-yaw).cos() - vy * (-yaw).sin();
                         let local_vy = vy * (-yaw).cos() + vx * (-yaw).sin();
                         sim.set_local_velocity(
                             local_vx,
                             local_vy,
                             *angular,
-                            current_speed,
+                            current_vx,
+                            current_vy,
                             current_angvel,
                             dt,
                         );
@@ -183,28 +195,27 @@ impl World {
                 }
             }
 
-            if cmd.kick_speed > 0.0001 {
+            if cmd.kick_speed > 0.0001 && sim.kick_countdown <= 0 {
                 let ball_body = self.physics.ball_body;
                 let ball_pos = self.physics.get_body_position(ball_body);
-                let kicker_pos = self.physics.get_body_position(handle.kicker_body);
                 let yaw = self.physics.get_body_yaw(handle.chassis_body) as f64;
                 let dir = [yaw.cos(), yaw.sin()];
+                let chassis_pos = self.physics.get_body_position(handle.chassis_body);
+                let chassis_vel = self.physics.get_body_linvel(handle.chassis_body);
+                let contact_origin = contact_origin_from_chassis(chassis_pos, &robot_cfg);
 
                 let touching = is_ball_touching_kicker(
                     [ball_pos.x as f64, ball_pos.y as f64, ball_pos.z as f64],
-                    [
-                        kicker_pos.x as f64,
-                        kicker_pos.y as f64,
-                        kicker_pos.z as f64,
-                    ],
+                    contact_origin,
                     dir,
-                    robot_cfg.kicker_thickness,
-                    robot_cfg.kicker_width,
+                    robot_cfg.center_from_kicker,
+                    robot_cfg.radius,
                     robot_cfg.kicker_height,
                     ball_radius,
+                    BALL_CONTACT_TOLERANCE,
                 );
 
-                if touching {
+                if sim.holding_ball || touching {
                     let mut kick_speed = cmd.kick_speed;
                     let limit = if cmd.kick_angle > 0.0 {
                         robot_cfg.max_chip_kick_speed
@@ -219,33 +230,28 @@ impl World {
                     let speed_xy = kick_angle_rad.cos() * kick_speed;
                     let speed_z = kick_angle_rad.sin() * kick_speed;
 
+                    let desired_vx = chassis_vel.x + dir[0] as f32 * speed_xy as f32;
+                    let desired_vy = chassis_vel.y + dir[1] as f32 * speed_xy as f32;
+                    let desired_vz = speed_z as f32;
                     let ball = &mut self.physics.rigid_body_set[ball_body];
-                    let old_vel = ball.linvel();
-
-                    let damp = robot_cfg.kicker_damp_factor as f32;
-                    let vn = -(old_vel.x * dir[0] as f32 + old_vel.y * dir[1] as f32) * damp;
-                    let vt = -(old_vel.x * dir[1] as f32 - old_vel.y * dir[0] as f32);
-
-                    let vx =
-                        dir[0] as f32 * speed_xy as f32 + vn * dir[0] as f32 - vt * dir[1] as f32;
-                    let vy =
-                        dir[1] as f32 * speed_xy as f32 + vn * dir[1] as f32 + vt * dir[0] as f32;
-                    let vz = speed_z as f32;
-
-                    ball.set_linvel(Vector::new(vx, vy, vz), true);
+                    ball.set_linvel(Vector::new(desired_vx, desired_vy, desired_vz), true);
+                    ball.set_angvel(Vector::ZERO, true);
 
                     sim.kick_type = if speed_z >= 1.0 {
                         KickType::Chip
                     } else {
                         KickType::Flat
                     };
-                    sim.kick_countdown = 10;
+                    sim.kick_countdown = 15;
+                    sim.holding_ball = false;
+                    sim.dribbler_on = false;
 
                     // Kicking releases possession — otherwise the dribble
                     // pull would yank the ball straight back next frame.
                     if self.holder == Some((team, cmd.id)) {
                         self.holder = None;
                     }
+                    self.physics.set_robot_ball_contact_enabled(handle, false);
                 }
             }
         }
@@ -289,7 +295,7 @@ impl World {
         // dribbler turns off or the ball falls out of the kicker pocket.
         // (Kicks clear the holder back in apply_robot_commands.)
         if let Some((team, idx)) = self.holder {
-            if !self.is_robot_holding(team, idx, ball_pos) {
+            if !self.is_robot_holding(team, idx, ball_pos, BALL_HOLD_TOLERANCE) {
                 self.holder = None;
             }
         }
@@ -298,14 +304,7 @@ impl World {
         // sticky from this point forward, so two robots fighting for the
         // ball can't ping-pong it back and forth every frame.
         if self.holder.is_none() {
-            let blue = self.find_team_holder_candidate(TeamColor::Blue, ball_pos);
-            let yellow = self.find_team_holder_candidate(TeamColor::Yellow, ball_pos);
-            self.holder = match (blue, yellow) {
-                (Some(b), Some(y)) => Some(if b.1 <= y.1 { (TeamColor::Blue, b.0) } else { (TeamColor::Yellow, y.0) }),
-                (Some(b), None) => Some((TeamColor::Blue, b.0)),
-                (None, Some(y)) => Some((TeamColor::Yellow, y.0)),
-                (None, None) => None,
-            };
+            self.holder = self.find_holder_candidate(ball_pos, BALL_CONTACT_TOLERANCE);
         }
 
         let Some((team, idx)) = self.holder else {
@@ -317,51 +316,88 @@ impl World {
             TeamColor::Yellow => self.yellow_sims[idx].holding_ball = true,
         }
 
+        self.stabilize_held_ball(team, idx);
+    }
+
+    fn stabilize_held_ball(&mut self, team: TeamColor, idx: usize) {
         let (handle, robot_cfg) = match team {
-            TeamColor::Blue => (&self.physics.blue_robots[idx], &self.config.blue_robots),
-            TeamColor::Yellow => (&self.physics.yellow_robots[idx], &self.config.yellow_robots),
+            TeamColor::Blue => {
+                let Some(handle) = self.physics.blue_robots.get(idx).cloned() else {
+                    return;
+                };
+                (handle, self.config.blue_robots.clone())
+            }
+            TeamColor::Yellow => {
+                let Some(handle) = self.physics.yellow_robots.get(idx).cloned() else {
+                    return;
+                };
+                (handle, self.config.yellow_robots.clone())
+            }
         };
 
         let chassis_pos = self.physics.get_body_position(handle.chassis_body);
         let chassis_vel = self.physics.get_body_linvel(handle.chassis_body);
+        let chassis_angvel = self.physics.get_body_angvel(handle.chassis_body);
         let yaw = self.physics.get_body_yaw(handle.chassis_body) as f64;
-        let dir = [yaw.cos(), yaw.sin()];
-
-        // Target: ball edge just kissing the kicker FRONT face (no
-        // penetration). The previous version aimed at a position inside the
-        // kicker box, so the PD pull and the kicker collider would fight
-        // and pump energy into the ball — launching it across the field.
-        let kicker_face_offset =
-            robot_cfg.center_from_kicker + robot_cfg.kicker_thickness * 1.5;
-        let front_offset = kicker_face_offset + self.config.ball.radius + 0.001;
-        let target_x = chassis_pos.x as f64 + dir[0] * front_offset;
-        let target_y = chassis_pos.y as f64 + dir[1] * front_offset;
-
-        // Critically-damped horizontal PD pull. No z component — gravity and
-        // the ground plane handle the vertical axis cleanly, and any pull
-        // there just fights the contact and bounces the ball.
-        let mass = self.physics.ball_mass();
-        let kp = 40.0_f32;
-        let kd = 2.0 * (kp / 1.0).sqrt() * 1.05;
-        let ball = &mut self.physics.rigid_body_set[ball_body];
-        let current_pos = ball.translation();
-        let current_vel = ball.linvel();
-        let dx = target_x as f32 - current_pos.x;
-        let dy = target_y as f32 - current_pos.y;
-        let dvx = chassis_vel.x - current_vel.x;
-        let dvy = chassis_vel.y - current_vel.y;
-        let force = Vector::new(
-            mass * (kp * dx + kd * dvx),
-            mass * (kp * dy + kd * dvy),
-            0.0,
+        let dir_x = yaw.cos();
+        let dir_y = yaw.sin();
+        let hold_distance = robot_cfg.center_from_kicker
+            + robot_cfg.kicker_thickness * 1.5
+            + self.config.ball.radius
+            + 0.002;
+        let desired_x = chassis_pos.x as f64 + dir_x * hold_distance;
+        let desired_y = chassis_pos.y as f64 + dir_y * hold_distance;
+        let desired_z = self.config.ball.radius + 0.005;
+        let rel_x = desired_x as f32 - chassis_pos.x;
+        let rel_y = desired_y as f32 - chassis_pos.y;
+        let desired_vx = chassis_vel.x - chassis_angvel.z * rel_y;
+        let desired_vy = chassis_vel.y + chassis_angvel.z * rel_x;
+        let ball = &mut self.physics.rigid_body_set[self.physics.ball_body];
+        let ball_pos = ball.translation();
+        let ball_vel = ball.linvel();
+        let err_x = desired_x as f32 - ball_pos.x;
+        let err_y = desired_y as f32 - ball_pos.y;
+        let err_z = desired_z as f32 - ball_pos.z;
+        let vel_err_x = desired_vx - ball_vel.x;
+        let vel_err_y = desired_vy - ball_vel.y;
+        let vel_err_z = -ball_vel.z;
+        let mut force = Vector::new(
+            err_x * BALL_HOLD_PULL_GAIN + vel_err_x * BALL_HOLD_DAMPING_GAIN,
+            err_y * BALL_HOLD_PULL_GAIN + vel_err_y * BALL_HOLD_DAMPING_GAIN,
+            err_z * BALL_HOLD_PULL_GAIN + vel_err_z * BALL_HOLD_DAMPING_GAIN,
         );
+        let force_mag = (force.x * force.x + force.y * force.y + force.z * force.z).sqrt();
+        if force_mag > BALL_HOLD_MAX_FORCE {
+            force *= BALL_HOLD_MAX_FORCE / force_mag;
+        }
         ball.add_force(force, true);
+        ball.set_angvel(Vector::ZERO, true);
+    }
+
+    fn find_holder_candidate(
+        &self,
+        ball_pos: rapier3d::na::Vector3<f32>,
+        tolerance: f64,
+    ) -> Option<(TeamColor, usize)> {
+        let blue = self.find_team_holder_candidate(TeamColor::Blue, ball_pos, tolerance);
+        let yellow = self.find_team_holder_candidate(TeamColor::Yellow, ball_pos, tolerance);
+        match (blue, yellow) {
+            (Some(b), Some(y)) => Some(if b.1 <= y.1 {
+                (TeamColor::Blue, b.0)
+            } else {
+                (TeamColor::Yellow, y.0)
+            }),
+            (Some(b), None) => Some((TeamColor::Blue, b.0)),
+            (None, Some(y)) => Some((TeamColor::Yellow, y.0)),
+            (None, None) => None,
+        }
     }
 
     fn find_team_holder_candidate(
         &self,
         team: TeamColor,
         ball_pos: rapier3d::na::Vector3<f32>,
+        tolerance: f64,
     ) -> Option<(usize, f64)> {
         let (sims, handles, robot_cfg) = match team {
             TeamColor::Blue => (
@@ -379,29 +415,27 @@ impl World {
         sims.iter()
             .zip(handles.iter())
             .enumerate()
-            .filter(|(_, (sim, _))| sim.is_on && sim.dribbler_on)
+            .filter(|(_, (sim, _))| sim.is_on && sim.dribbler_on && sim.kick_countdown <= 0)
             .filter_map(|(index, (_, handle))| {
-                let kicker_pos = self.physics.get_body_position(handle.kicker_body);
                 let yaw = self.physics.get_body_yaw(handle.chassis_body) as f64;
                 let dir = [yaw.cos(), yaw.sin()];
+                let chassis_pos = self.physics.get_body_position(handle.chassis_body);
+                let contact_origin = contact_origin_from_chassis(chassis_pos, robot_cfg);
                 let touching = is_ball_touching_kicker(
                     [ball_pos.x as f64, ball_pos.y as f64, ball_pos.z as f64],
-                    [
-                        kicker_pos.x as f64,
-                        kicker_pos.y as f64,
-                        kicker_pos.z as f64,
-                    ],
+                    contact_origin,
                     dir,
-                    robot_cfg.kicker_thickness,
-                    robot_cfg.kicker_width,
+                    robot_cfg.center_from_kicker,
+                    robot_cfg.radius,
                     robot_cfg.kicker_height,
                     self.config.ball.radius,
+                    tolerance,
                 );
                 if !touching {
                     return None;
                 }
-                let dx = ball_pos.x as f64 - kicker_pos.x as f64;
-                let dy = ball_pos.y as f64 - kicker_pos.y as f64;
+                let dx = ball_pos.x as f64 - chassis_pos.x as f64;
+                let dy = ball_pos.y as f64 - chassis_pos.y as f64;
                 Some((index, dx * dx + dy * dy))
             })
             .min_by(|(_, left), (_, right)| left.total_cmp(right))
@@ -412,6 +446,7 @@ impl World {
         team: TeamColor,
         idx: usize,
         ball_pos: rapier3d::na::Vector3<f32>,
+        tolerance: f64,
     ) -> bool {
         let (sims, handles, robot_cfg) = match team {
             TeamColor::Blue => (
@@ -428,24 +463,22 @@ impl World {
         let (Some(sim), Some(handle)) = (sims.get(idx), handles.get(idx)) else {
             return false;
         };
-        if !sim.is_on || !sim.dribbler_on {
+        if !sim.is_on || !sim.dribbler_on || sim.kick_countdown > 0 {
             return false;
         }
-        let kicker_pos = self.physics.get_body_position(handle.kicker_body);
         let yaw = self.physics.get_body_yaw(handle.chassis_body) as f64;
         let dir = [yaw.cos(), yaw.sin()];
+        let chassis_pos = self.physics.get_body_position(handle.chassis_body);
+        let contact_origin = contact_origin_from_chassis(chassis_pos, robot_cfg);
         is_ball_touching_kicker(
             [ball_pos.x as f64, ball_pos.y as f64, ball_pos.z as f64],
-            [
-                kicker_pos.x as f64,
-                kicker_pos.y as f64,
-                kicker_pos.z as f64,
-            ],
+            contact_origin,
             dir,
-            robot_cfg.kicker_thickness,
-            robot_cfg.kicker_width,
+            robot_cfg.center_from_kicker,
+            robot_cfg.radius,
             robot_cfg.kicker_height,
             self.config.ball.radius,
+            tolerance,
         )
     }
 
@@ -511,18 +544,17 @@ impl World {
             .teleport_body(handle.chassis_body, x, y, start_z);
         self.physics.reset_body_velocity(handle.chassis_body);
 
-        if let Some(orientation) = tr.orientation {
-            self.physics
-                .set_body_yaw(handle.chassis_body, orientation as f32);
-        }
+        let yaw = tr.orientation.unwrap_or(self.physics.get_body_yaw(handle.chassis_body) as f64) as f32;
+        self.physics.set_body_yaw(handle.chassis_body, yaw);
 
         if let Some(present) = tr.present {
             sim.is_on = present;
             if !present {
-                let off_x = 1e6 * tr.id as f32;
-                let off_y = 1e6 * tr.team as u8 as f32;
+                let off_x = 100.0 + tr.id as f32;
+                let off_y = 100.0 + tr.team as u8 as f32;
                 self.physics
                     .teleport_body(handle.chassis_body, off_x, off_y, start_z);
+                self.physics.reset_body_velocity(handle.chassis_body);
             }
         }
 
@@ -600,20 +632,23 @@ impl World {
                 let yaw = self.physics.get_body_yaw(handle.chassis_body);
 
                 // Check infrared (ball near kicker)
-                let kicker_pos = self.physics.get_body_position(handle.kicker_body);
                 let dir = [yaw.cos() as f64, yaw.sin() as f64];
-                let infrared = is_ball_touching_kicker(
+                let contact_origin = contact_origin_from_chassis(pos, robot_cfg);
+                // Sumatra's barrier bit needs to stay high for the robot that
+                // currently owns the dribbled ball. The geometric kicker test
+                // is still useful for acquisition, but once the dribbler logic
+                // has snapped the ball to a single holder, reporting only the
+                // raw geometry can flicker false and stall the kick state
+                // machine upstream.
+                let infrared = sim.holding_ball || is_ball_touching_kicker(
                     [ball_pos.x as f64, ball_pos.y as f64, ball_pos.z as f64],
-                    [
-                        kicker_pos.x as f64,
-                        kicker_pos.y as f64,
-                        kicker_pos.z as f64,
-                    ],
+                    contact_origin,
                     dir,
-                    robot_cfg.kicker_thickness,
-                    robot_cfg.kicker_width,
+                    robot_cfg.center_from_kicker,
+                    robot_cfg.radius,
                     robot_cfg.kicker_height,
                     self.config.ball.radius,
+                    0.02,
                 );
 
                 let kick_status = match sim.kick_type {
@@ -634,6 +669,7 @@ impl World {
                     vz: vel.z as f64,
                     v_angular: angvel.z as f64,
                     infrared,
+                    dribbler_on: sim.dribbler_on,
                     kick_status,
                     is_on: sim.is_on,
                     wheel_speeds: sim.wheel_speeds,
@@ -701,4 +737,17 @@ fn keep_only_closest_infrared(
             robot.infrared = false;
         }
     }
+}
+
+fn contact_origin_from_chassis(
+    chassis_pos: rapier3d::na::Vector3<f32>,
+    robot_cfg: &RobotConfig,
+) -> [f64; 3] {
+    [
+        chassis_pos.x as f64,
+        chassis_pos.y as f64,
+        chassis_pos.z as f64 - robot_cfg.height * 0.5 + robot_cfg.wheel_radius
+            - robot_cfg.bottom_height
+            + robot_cfg.kicker_z,
+    ]
 }

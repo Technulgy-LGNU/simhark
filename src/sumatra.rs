@@ -1,6 +1,8 @@
 use std::collections::{HashMap, HashSet};
+use std::env;
 use std::io::{ErrorKind, Read, Result, Write};
 use std::net::{SocketAddr, TcpListener, TcpStream};
+use std::sync::{Mutex, OnceLock};
 
 use prost::Message;
 
@@ -150,8 +152,9 @@ impl SumatraSimNetServer {
 }
 
 fn build_request(state: &WorldState) -> SimRequest {
+    let ball_motion = estimate_ball_motion(state);
     SimRequest {
-        timestamp: (state.sim_time * 1_000_000.0) as i64,
+        timestamp: (state.sim_time * 1_000_000_000.0) as i64,
         frame_id: state.frame as i64,
         bot_state: state
             .blue_robots
@@ -175,8 +178,15 @@ fn build_request(state: &WorldState) -> SimRequest {
                 y: state.ball.vy * 1000.0,
                 z: state.ball.vz * 1000.0,
             }),
-            acc: Some(Vector3::default()),
-            spin: Some(Vector2::default()),
+            acc: Some(Vector3 {
+                x: ball_motion.acc.0 * 1000.0,
+                y: ball_motion.acc.1 * 1000.0,
+                z: ball_motion.acc.2 * 1000.0,
+            }),
+            spin: Some(Vector2 {
+                x: ball_motion.spin.0,
+                y: ball_motion.spin.1,
+            }),
         }),
         last_kick_event: None,
         referee_message: Some(default_referee(state)),
@@ -205,12 +215,12 @@ fn bot_state(robot: &crate::state::RobotState, team: TeamColor) -> SimBotState {
 
 fn default_referee(state: &WorldState) -> SimReferee {
     SimReferee {
-        packet_timestamp: (state.sim_time * 1_000_000.0) as u64,
+        packet_timestamp: (state.sim_time * 1_000_000_000.0) as u64,
         stage: sim_referee::Stage::NormalFirstHalf as i32,
         stage_time_left: Some(0),
         command: sim_referee::Command::ForceStart as i32,
         command_counter: state.frame as u32,
-        command_timestamp: (state.sim_time * 1_000_000.0) as u64,
+        command_timestamp: (state.sim_time * 1_000_000_000.0) as u64,
         yellow: sim_referee::TeamInfo {
             name: "Yellow".into(),
             score: 0,
@@ -249,13 +259,29 @@ fn decode_action(
     let robot = robot_state(state, team, bot_id.id as usize)?;
     let mode_xy = DriveMode::try_from(action.mode_xy).ok()?;
     let mode_w = DriveMode::try_from(action.mode_w).ok()?;
+    if env::var_os("SIMHARK_SUMATRA_TRACE_ACTIONS").is_some() {
+        eprintln!(
+            "sumatra-action team={team:?} id={} mode_xy={mode_xy:?} mode_w={mode_w:?} target_pos={:?} target_vel_local={:?} kick_speed={:.2} dribble_rpm={:.1} disarm={}",
+            bot_id.id,
+            action.target_pos,
+            action.target_vel_local,
+            action.kick_speed,
+            action.dribble_rpm,
+            action.disarm,
+        );
+    }
     let move_command = match mode_xy {
         DriveMode::WheelVel => action.target_wheel_vel.as_ref().map(|wheel| {
             let mut values = [0.0; 4];
             for (index, value) in wheel.x.iter().copied().take(4).enumerate() {
                 values[index] = value;
             }
-            MoveCommand::WheelVelocity(values)
+            let (forward, left, angular) = decode_sumatra_wheel_velocity(values);
+            MoveCommand::LocalVelocity {
+                forward,
+                left,
+                angular,
+            }
         }),
         _ => decode_velocity_action(&action, robot, mode_xy, mode_w),
     };
@@ -264,7 +290,11 @@ fn decode_action(
         RobotCommand {
             id: bot_id.id as usize,
             move_command,
-            kick_speed: action.kick_speed,
+            kick_speed: if action.disarm {
+                0.0
+            } else {
+                action.kick_speed * 0.001
+            },
             kick_angle: if action.chip { 45.0 } else { 0.0 },
             dribbler_on: action.dribble_rpm > 0.0,
         },
@@ -303,21 +333,22 @@ fn decode_velocity_action(
         DriveMode::GlobalPos => {
             let target = action.target_pos.as_ref()?;
             let limits = action.drive_limits.as_ref();
-            let vel_limit = limits.map_or(3.0, |limits| limits.vel_max).max(0.1);
             let target_x = target.x * 0.001;
             let target_y = target.y * 0.001;
-            Some(MoveCommand::GlobalVelocity {
-                vx: clamp((target_x - robot.x) * 4.0, vel_limit),
-                vy: clamp((target_y - robot.y) * 4.0, vel_limit),
-                angular,
-            })
+            let (vx, vy) = damped_global_velocity(
+                (target_x - robot.x, target_y - robot.y),
+                (robot.vx, robot.vy),
+                action
+                    .primary_direction
+                    .as_ref()
+                    .map(|dir| (dir.x, dir.y)),
+                limits.map_or(3.0, |limits| limits.vel_max),
+                limits.map_or(4.0, |limits| limits.acc_max),
+            );
+            Some(MoveCommand::GlobalVelocity { vx, vy, angular })
         }
         DriveMode::WheelVel => None,
     }
-}
-
-fn clamp(value: f64, limit: f64) -> f64 {
-    value.clamp(-limit, limit)
 }
 
 fn decode_angular_velocity(
@@ -330,17 +361,78 @@ fn decode_angular_velocity(
         DriveMode::LocalVel => Some(action.target_vel_local.as_ref()?.z),
         DriveMode::GlobalPos => {
             let target = action.target_pos.as_ref()?;
-            let limit = action
-                .drive_limits
-                .as_ref()
-                .map_or(10.0, |limits| limits.vel_max_w)
-                .max(0.1);
-            Some(clamp(
-                normalize_angle(target.z - robot.orientation) * 6.0,
-                limit,
+            Some(damped_angular_velocity(
+                normalize_angle(target.z - robot.orientation),
+                robot.v_angular,
+                action
+                    .drive_limits
+                    .as_ref()
+                    .map_or(10.0, |limits| limits.vel_max_w),
+                action
+                    .drive_limits
+                    .as_ref()
+                    .map_or(50.0, |limits| limits.acc_max_w),
             ))
         }
     }
+}
+
+fn damped_global_velocity(
+    position_error: (f64, f64),
+    current_velocity: (f64, f64),
+    primary_direction: Option<(f64, f64)>,
+    vel_limit: f64,
+    acc_limit: f64,
+) -> (f64, f64) {
+    let vel_limit = vel_limit.max(0.1);
+    let acc_limit = acc_limit.max(0.1);
+    let distance =
+        (position_error.0 * position_error.0 + position_error.1 * position_error.1).sqrt();
+    if distance <= 1e-5 {
+        return (0.0, 0.0);
+    }
+
+    let mut dir_x = position_error.0 / distance;
+    let mut dir_y = position_error.1 / distance;
+    if let Some((px, py)) = primary_direction {
+        let mag = (px * px + py * py).sqrt();
+        if mag > 1e-6 {
+            let primary_x = px / mag;
+            let primary_y = py / mag;
+            let alignment = dir_x * primary_x + dir_y * primary_y;
+            if alignment > -0.25 {
+                dir_x = (dir_x + primary_x * 0.35).clamp(-1.0, 1.0);
+                dir_y = (dir_y + primary_y * 0.35).clamp(-1.0, 1.0);
+                let norm = (dir_x * dir_x + dir_y * dir_y).sqrt();
+                if norm > 1e-6 {
+                    dir_x /= norm;
+                    dir_y /= norm;
+                }
+            }
+        }
+    }
+    let braking_speed = (2.0 * acc_limit * distance).sqrt().min(vel_limit);
+    let current_speed_along = current_velocity.0 * dir_x + current_velocity.1 * dir_y;
+    let requested_speed =
+        (distance * 4.0 - current_speed_along * 0.75).clamp(-braking_speed, braking_speed);
+
+    (dir_x * requested_speed, dir_y * requested_speed)
+}
+
+fn damped_angular_velocity(
+    angle_error: f64,
+    current_angular_velocity: f64,
+    vel_limit: f64,
+    acc_limit: f64,
+) -> f64 {
+    let vel_limit = vel_limit.max(0.1);
+    let acc_limit = acc_limit.max(0.1);
+    if angle_error.abs() <= 1e-5 {
+        return 0.0;
+    }
+
+    let braking_speed = (2.0 * acc_limit * angle_error.abs()).sqrt().min(vel_limit);
+    (angle_error * 6.0 - current_angular_velocity * 0.35).clamp(-braking_speed, braking_speed)
 }
 
 fn robot_state(
@@ -357,6 +449,162 @@ fn robot_state(
 
 fn normalize_angle(angle: f64) -> f64 {
     angle.sin().atan2(angle.cos())
+}
+
+fn decode_sumatra_wheel_velocity(wheels: [f64; 4]) -> (f64, f64, f64) {
+    const SUMATRA_WHEEL_RADIUS: f64 = 0.025;
+    const SUMATRA_ROBOT_RADIUS: f64 = 0.076;
+    const FRONT_ANGLE_RAD: f64 = 30.0_f64.to_radians();
+    const BACK_ANGLE_RAD: f64 = 45.0_f64.to_radians();
+
+    let angles = [
+        FRONT_ANGLE_RAD,
+        std::f64::consts::PI - FRONT_ANGLE_RAD,
+        std::f64::consts::PI + BACK_ANGLE_RAD,
+        std::f64::consts::TAU - BACK_ANGLE_RAD,
+    ];
+
+    // Matches Sumatra's MatrixMotorModel pseudoinverse mapping.
+    let mut d = [[0.0; 3]; 4];
+    for (row, angle) in d.iter_mut().zip(angles) {
+        row[0] = -angle.sin();
+        row[1] = angle.cos();
+        row[2] = SUMATRA_ROBOT_RADIUS;
+    }
+
+    let mut gram = [[0.0; 3]; 3];
+    for row in d {
+        for i in 0..3 {
+            for j in 0..3 {
+                gram[i][j] += row[i] * row[j];
+            }
+        }
+    }
+
+    let inv = invert_3x3(gram).unwrap_or([[0.0; 3]; 3]);
+
+    let mut dt_wheels = [0.0; 3];
+    for (row, wheel) in [
+        [
+            -FRONT_ANGLE_RAD.sin(),
+            FRONT_ANGLE_RAD.cos(),
+            SUMATRA_ROBOT_RADIUS,
+        ],
+        [
+            -(std::f64::consts::PI - FRONT_ANGLE_RAD).sin(),
+            (std::f64::consts::PI - FRONT_ANGLE_RAD).cos(),
+            SUMATRA_ROBOT_RADIUS,
+        ],
+        [
+            -(std::f64::consts::PI + BACK_ANGLE_RAD).sin(),
+            (std::f64::consts::PI + BACK_ANGLE_RAD).cos(),
+            SUMATRA_ROBOT_RADIUS,
+        ],
+        [
+            -(std::f64::consts::TAU - BACK_ANGLE_RAD).sin(),
+            (std::f64::consts::TAU - BACK_ANGLE_RAD).cos(),
+            SUMATRA_ROBOT_RADIUS,
+        ],
+    ]
+    .into_iter()
+    .zip(wheels)
+    {
+        for i in 0..3 {
+            dt_wheels[i] += row[i] * wheel;
+        }
+    }
+
+    let mut body = [0.0; 3];
+    for i in 0..3 {
+        for (j, value) in dt_wheels.iter().enumerate() {
+            body[i] += inv[i][j] * value;
+        }
+        body[i] *= SUMATRA_WHEEL_RADIUS;
+    }
+
+    (body[0], body[1], body[2])
+}
+
+fn invert_3x3(matrix: [[f64; 3]; 3]) -> Option<[[f64; 3]; 3]> {
+    let det = matrix[0][0] * (matrix[1][1] * matrix[2][2] - matrix[1][2] * matrix[2][1])
+        - matrix[0][1] * (matrix[1][0] * matrix[2][2] - matrix[1][2] * matrix[2][0])
+        + matrix[0][2] * (matrix[1][0] * matrix[2][1] - matrix[1][1] * matrix[2][0]);
+    if det.abs() <= f64::EPSILON {
+        return None;
+    }
+    let inv_det = 1.0 / det;
+    Some([
+        [
+            (matrix[1][1] * matrix[2][2] - matrix[1][2] * matrix[2][1]) * inv_det,
+            (matrix[0][2] * matrix[2][1] - matrix[0][1] * matrix[2][2]) * inv_det,
+            (matrix[0][1] * matrix[1][2] - matrix[0][2] * matrix[1][1]) * inv_det,
+        ],
+        [
+            (matrix[1][2] * matrix[2][0] - matrix[1][0] * matrix[2][2]) * inv_det,
+            (matrix[0][0] * matrix[2][2] - matrix[0][2] * matrix[2][0]) * inv_det,
+            (matrix[0][2] * matrix[1][0] - matrix[0][0] * matrix[1][2]) * inv_det,
+        ],
+        [
+            (matrix[1][0] * matrix[2][1] - matrix[1][1] * matrix[2][0]) * inv_det,
+            (matrix[0][1] * matrix[2][0] - matrix[0][0] * matrix[2][1]) * inv_det,
+            (matrix[0][0] * matrix[1][1] - matrix[0][1] * matrix[1][0]) * inv_det,
+        ],
+    ])
+}
+
+#[derive(Clone, Copy)]
+struct BallMotionEstimate {
+    acc: (f64, f64, f64),
+    spin: (f64, f64),
+}
+
+#[derive(Clone, Copy)]
+struct PreviousBallSample {
+    sim_time: f64,
+    vx: f64,
+    vy: f64,
+    vz: f64,
+}
+
+fn estimate_ball_motion(state: &WorldState) -> BallMotionEstimate {
+    static PREVIOUS_BALL_SAMPLE: OnceLock<Mutex<Option<PreviousBallSample>>> = OnceLock::new();
+    let store = PREVIOUS_BALL_SAMPLE.get_or_init(|| Mutex::new(None));
+    let mut previous = store.lock().expect("ball motion cache poisoned");
+
+    let dt = previous
+        .as_ref()
+        .map(|sample| state.sim_time - sample.sim_time)
+        .filter(|dt| *dt > f64::EPSILON)
+        .unwrap_or(0.0);
+
+    let acc = previous
+        .as_ref()
+        .filter(|_| dt > 0.0)
+        .map(|sample| {
+            (
+                (state.ball.vx - sample.vx) / dt,
+                (state.ball.vy - sample.vy) / dt,
+                (state.ball.vz - sample.vz) / dt,
+            )
+        })
+        .unwrap_or((0.0, 0.0, 0.0));
+
+    *previous = Some(PreviousBallSample {
+        sim_time: state.sim_time,
+        vx: state.ball.vx,
+        vy: state.ball.vy,
+        vz: state.ball.vz,
+    });
+
+    let planar_speed = (state.ball.vx * state.ball.vx + state.ball.vy * state.ball.vy).sqrt();
+    let spin = if planar_speed > 1e-5 {
+        let inv_radius = 1.0 / 0.0215;
+        (-state.ball.vy * inv_radius, state.ball.vx * inv_radius)
+    } else {
+        (0.0, 0.0)
+    };
+
+    BallMotionEstimate { acc, spin }
 }
 
 fn merge_actions_into_world_command(

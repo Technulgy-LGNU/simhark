@@ -30,6 +30,8 @@ pub mod domain_randomization;
 pub mod engine;
 pub mod geometry;
 pub mod grsim;
+#[cfg(feature = "motion-audit")]
+pub mod motion_audit;
 pub mod physics;
 pub mod proto;
 pub mod robot;

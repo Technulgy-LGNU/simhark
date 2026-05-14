@@ -41,6 +41,8 @@ pub struct RobotState {
     pub v_angular: f64,
     /// Whether the infrared sensor detects the ball near the kicker.
     pub infrared: bool,
+    /// Whether the dribbler is currently commanded on.
+    pub dribbler_on: bool,
     /// Current kick status.
     pub kick_status: KickStatus,
     /// Whether the robot is active/on.
