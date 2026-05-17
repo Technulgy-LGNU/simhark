@@ -201,7 +201,6 @@ impl World {
                 let yaw = self.physics.get_body_yaw(handle.chassis_body) as f64;
                 let dir = [yaw.cos(), yaw.sin()];
                 let chassis_pos = self.physics.get_body_position(handle.chassis_body);
-                let chassis_vel = self.physics.get_body_linvel(handle.chassis_body);
                 let contact_origin = contact_origin_from_chassis(chassis_pos, &robot_cfg);
 
                 let touching = is_ball_touching_kicker(
@@ -230,8 +229,18 @@ impl World {
                     let speed_xy = kick_angle_rad.cos() * kick_speed;
                     let speed_z = kick_angle_rad.sin() * kick_speed;
 
-                    let desired_vx = chassis_vel.x + dir[0] as f32 * speed_xy as f32;
-                    let desired_vy = chassis_vel.y + dir[1] as f32 * speed_xy as f32;
+                    let ball_vel = self.physics.get_body_linvel(ball_body);
+                    let dir_x = dir[0] as f32;
+                    let dir_y = dir[1] as f32;
+                    let kicker_damp = robot_cfg.kicker_damp_factor as f32;
+                    let vn = -(ball_vel.x * dir_x + ball_vel.y * dir_y) * kicker_damp;
+                    let vt = -(ball_vel.x * dir_y - ball_vel.y * dir_x);
+
+                    // Mirror grSim's kicker release: launch along the dribbler
+                    // axis, then damp the component along the kicker and cancel
+                    // tangential slip so long shots do not inherit sideways drift.
+                    let desired_vx = dir_x * speed_xy as f32 + vn * dir_x - vt * dir_y;
+                    let desired_vy = dir_y * speed_xy as f32 + vn * dir_y + vt * dir_x;
                     let desired_vz = speed_z as f32;
                     let ball = &mut self.physics.rigid_body_set[ball_body];
                     ball.set_linvel(Vector::new(desired_vx, desired_vy, desired_vz), true);
@@ -540,12 +549,14 @@ impl World {
         let x = tr.x.unwrap_or(pos.x as f64) as f32;
         let y = tr.y.unwrap_or(pos.y as f64) as f32;
 
+        let current_yaw = self.physics.get_body_yaw(handle.chassis_body) as f64;
+        let yaw = tr.orientation.unwrap_or(current_yaw) as f32;
+
         self.physics
             .teleport_body(handle.chassis_body, x, y, start_z);
-        self.physics.reset_body_velocity(handle.chassis_body);
-
-        let yaw = tr.orientation.unwrap_or(self.physics.get_body_yaw(handle.chassis_body) as f64) as f32;
         self.physics.set_body_yaw(handle.chassis_body, yaw);
+        self.physics.reset_body_velocity(handle.chassis_body);
+        sim.reset_speeds();
 
         if let Some(present) = tr.present {
             sim.is_on = present;
@@ -558,7 +569,22 @@ impl World {
             }
         }
 
-        sim.reset_speeds();
+        if sim.is_on && (tr.vx.is_some() || tr.vy.is_some() || tr.v_angular.is_some()) {
+            let vx_world = tr.vx.unwrap_or(0.0);
+            let vy_world = tr.vy.unwrap_or(0.0);
+            let yaw64 = yaw as f64;
+            let vx_local = vx_world * (-yaw64).cos() - vy_world * (-yaw64).sin();
+            let vy_local = vy_world * (-yaw64).cos() + vx_world * (-yaw64).sin();
+            sim.set_local_velocity(
+                vx_local,
+                vy_local,
+                tr.v_angular.unwrap_or(0.0),
+                0.0,
+                0.0,
+                0.0,
+                self.config.physics.delta_time,
+            );
+        }
     }
 
     /// Extract the current state snapshot.

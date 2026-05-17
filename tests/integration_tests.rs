@@ -388,6 +388,48 @@ fn test_teleport_robot() {
         "robot y should be near 2.0, got {}",
         state.blue_robots[0].y
     );
+    assert!(
+        (state.blue_robots[0].orientation - std::f64::consts::PI / 2.0).abs() < 0.2,
+        "robot orientation should be near pi/2, got {}",
+        state.blue_robots[0].orientation
+    );
+}
+
+#[test]
+fn test_teleport_robot_applies_requested_velocity() {
+    let mut world = World::new(0, WorldConfig::division_a());
+
+    world.step(&WorldCommand {
+        teleport_robots: vec![TeleportRobot {
+            id: 0,
+            team: TeamColor::Blue,
+            x: Some(0.0),
+            y: Some(0.0),
+            orientation: Some(0.0),
+            vx: Some(1.25),
+            vy: Some(-0.5),
+            v_angular: Some(0.75),
+            present: Some(true),
+        }],
+        ..Default::default()
+    });
+
+    let state = world.get_state();
+    assert!(
+        state.blue_robots[0].vx > 0.05,
+        "robot vx should move in the requested direction, got {}",
+        state.blue_robots[0].vx
+    );
+    assert!(
+        state.blue_robots[0].vy < -0.02,
+        "robot vy should move in the requested direction, got {}",
+        state.blue_robots[0].vy
+    );
+    assert!(
+        (state.blue_robots[0].v_angular - 0.75).abs() < 0.15,
+        "robot angular velocity should be near requested velocity, got {}",
+        state.blue_robots[0].v_angular
+    );
 }
 
 #[test]
@@ -656,7 +698,7 @@ fn test_velocity_limit_in_command() {
     let mut sim = simhark::robot::RobotSim::new(0, &config.blue_robots, 1.0);
 
     // Request absurd velocity
-    sim.set_local_velocity(100.0, 0.0, 0.0, 0.0, 0.0, 1.0 / 60.0);
+    sim.set_local_velocity(100.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0 / 60.0);
 
     // Wheel speeds should be bounded by the vel_absolute_max -> wheel conversion
     let max_wheel = sim
@@ -732,7 +774,7 @@ fn test_command_for_nonexistent_robot_ignored() {
 #[test]
 #[ignore = "requires built Sumatra checkout"]
 fn test_sumatra_single_team_scores_five_goals() {
-    let mut config = WorldConfig::division_b();
+    let mut config = WorldConfig::division_a();
     config.robots_per_team = 6;
     let mut engine = SimulationEngine::new(1, config.clone());
     let mut server = SumatraSimNetServer::bind(SumatraSimNetConfig::default()).unwrap();

@@ -102,7 +102,10 @@ impl RobotSim {
             } else {
                 self.acc_brake_abs
             };
-            let max_delta_v = accel_limit * dt;
+            // grSim applies the acceleration cap with `DeltaTime() * 2` because
+            // the velocity command is consumed across the two internal physics
+            // ticks that make up one external frame.
+            let max_delta_v = accel_limit * dt * 2.0;
             let delta_vx = vx - current_vx;
             let delta_vy = vy - current_vy;
             let delta_speed = (delta_vx * delta_vx + delta_vy * delta_vy).sqrt();
@@ -118,7 +121,7 @@ impl RobotSim {
             } else {
                 self.acc_brake_ang
             };
-            let max_angular_delta = angular_limit * dt;
+            let max_angular_delta = angular_limit * dt * 2.0;
             if angular_delta.abs() > max_angular_delta {
                 vw = current_angvel + angular_delta.signum() * max_angular_delta;
             }

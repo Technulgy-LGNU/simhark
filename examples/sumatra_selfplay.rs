@@ -9,21 +9,38 @@ use referris::{
 };
 #[cfg(feature = "motion-audit")]
 use simhark::motion_audit::{MotionAuditor, robot_motion_summary};
-use simhark::viewer::{ViewerConfig, ViewerServer};
+use simhark::viewer::{GameStateInfo, ViewerConfig, ViewerServer};
 use simhark::{
-    RobotState, SimulationEngine, SumatraSimNetConfig, SumatraSimNetServer, TeamColor, WorldConfig,
-    WorldState,
+    RobotState, SimulationEngine, SumatraSimNetConfig, SumatraSimNetServer, TeamColor,
+    TeleportBall, WorldCommand, WorldConfig, WorldState,
 };
 use simhark_sumatra::{SumatraInstance, SumatraLaunchConfig};
 
 const MOTION_LOG_EVERY_FRAMES: u64 = 15;
+const BALL_RECOVERY_IDLE_FRAMES: u64 = 20;
+const BALL_RECOVERY_STUCK_SPEED: f64 = 0.35;
+
+fn sumatra_remote_world_config() -> WorldConfig {
+    // The remote sim_client path does not receive geometry updates. Sumatra
+    // therefore falls back to its static default geometry (DIV_A), so the
+    // example world must match that geometry to keep goal targeting aligned.
+    WorldConfig::division_a()
+}
 
 fn main() -> Result<()> {
-    let mut engine = SimulationEngine::new(1, WorldConfig::division_b());
+    let web_control = std::env::args().any(|arg| arg == "--web-control");
+
+    let base_config = sumatra_remote_world_config();
+    let mut engine = SimulationEngine::new(1, base_config.clone());
     let mut autoref = AutoRef::default();
     let viewer_config = ViewerConfig::default();
     let viewer = ViewerServer::bind(viewer_config, 1, &engine.world(0).config)?;
-    println!("viewer: {}", viewer_config.http_url());
+    if web_control {
+        viewer.enable_web_control();
+        println!("viewer: {} (web-control)", viewer_config.http_url());
+    } else {
+        println!("viewer: {}", viewer_config.http_url());
+    }
 
     let mut server = SumatraSimNetServer::bind(SumatraSimNetConfig::default())?;
     let mut yellow = SumatraInstance::spawn(&SumatraLaunchConfig {
@@ -43,16 +60,51 @@ fn main() -> Result<()> {
 
     let start = Instant::now();
     let mut previous_state = None;
+    let mut ball_unreachable_frames = 0_u64;
     #[cfg(feature = "motion-audit")]
     let mut motion_auditor = MotionAuditor::default();
-    while start.elapsed() < Duration::from_secs(20) {
+
+    loop {
+        if !web_control && start.elapsed() >= Duration::from_secs(20) {
+            break;
+        }
+
+        if viewer.take_restart_request() {
+            println!("web-control: restart");
+            engine = SimulationEngine::new(1, base_config.clone());
+            autoref = AutoRef::default();
+            viewer.reset_goals();
+            previous_state = None;
+            ball_unreachable_frames = 0;
+            #[cfg(feature = "motion-audit")]
+            {
+                motion_auditor = MotionAuditor::default();
+            }
+        }
+
+        if web_control && !viewer.is_running() {
+            // Still publish the latest world snapshot so the UI stays
+            // responsive while paused.
+            let state = engine.world(0).get_state();
+            viewer.publish(&state);
+            if yellow.try_wait()?.is_some() || blue.try_wait()?.is_some() {
+                break;
+            }
+            thread::sleep(Duration::from_millis(50));
+            continue;
+        }
+
         server.step(&mut engine)?;
+        maybe_recover_ball(&mut engine, &mut ball_unreachable_frames);
         let state = engine.world(0).get_state();
         let world = engine.world(0);
         let input = referris_input(&state, &world.config);
         let step = autoref.step(&input);
         for event in step.events {
             println!("referris: {event:?}");
+        }
+        if let Some(referee) = input.referee.as_ref() {
+            viewer.set_game_state(referee_to_viewer(referee));
         }
         viewer.publish(&state);
         log_motion(
@@ -70,6 +122,84 @@ fn main() -> Result<()> {
     }
 
     Ok(())
+}
+
+fn maybe_recover_ball(engine: &mut SimulationEngine, unreachable_frames: &mut u64) {
+    let state = engine.world(0).get_state();
+    let config = &engine.world(0).config;
+
+    let Some(reason) = ball_recovery_reason(&state, config) else {
+        *unreachable_frames = 0;
+        return;
+    };
+
+    *unreachable_frames += 1;
+    if *unreachable_frames < BALL_RECOVERY_IDLE_FRAMES {
+        return;
+    }
+
+    eprintln!(
+        "ball-recovery reason={} frame={} pos=({:.3},{:.3},{:.3}) vel=({:.2},{:.2},{:.2})",
+        reason,
+        state.frame,
+        state.ball.x,
+        state.ball.y,
+        state.ball.z,
+        state.ball.vx,
+        state.ball.vy,
+        state.ball.vz,
+    );
+
+    engine.step_with_commands(&[WorldCommand {
+        teleport_ball: Some(TeleportBall {
+            x: Some(0.0),
+            y: Some(0.0),
+            z: Some(0.0),
+            vx: Some(0.0),
+            vy: Some(0.0),
+            vz: Some(0.0),
+        }),
+        ..Default::default()
+    }]);
+    *unreachable_frames = 0;
+}
+
+fn ball_recovery_reason(state: &WorldState, config: &WorldConfig) -> Option<&'static str> {
+    let half_length = config.field.field_length * 0.5;
+    let half_width = config.field.field_width * 0.5;
+
+    if state.goal_blue || state.goal_yellow {
+        return Some("goal");
+    }
+
+    let outside_playing_field = state.ball.x.abs() > half_length || state.ball.y.abs() > half_width;
+    if outside_playing_field {
+        let speed = speed3(state.ball.vx, state.ball.vy, state.ball.vz);
+        if speed <= BALL_RECOVERY_STUCK_SPEED {
+            return Some("out-of-field");
+        }
+        return None;
+    }
+
+    let speed = speed3(state.ball.vx, state.ball.vy, state.ball.vz);
+    if speed > BALL_RECOVERY_STUCK_SPEED {
+        return None;
+    }
+
+    let robot_radius = config.blue_robots.radius.max(config.yellow_robots.radius);
+    let max_contact_reach = config
+        .blue_robots
+        .center_from_kicker
+        .max(config.yellow_robots.center_from_kicker)
+        + config.ball.radius
+        + 0.03;
+    let reachable_x = half_length + config.field.margin_goal_line - robot_radius + max_contact_reach;
+    let reachable_y = half_width + config.field.margin_touch_line - robot_radius + max_contact_reach;
+    if state.ball.x.abs() > reachable_x || state.ball.y.abs() > reachable_y {
+        return Some("outside-robot-reach");
+    }
+
+    None
 }
 
 fn referris_input(state: &simhark::WorldState, config: &WorldConfig) -> InputEnvelope {
@@ -138,6 +268,39 @@ fn referris_input(state: &simhark::WorldState, config: &WorldConfig) -> InputEnv
                 .collect(),
             kicked_ball: None,
         }),
+    }
+}
+
+fn referee_to_viewer(referee: &referris::RefereeSnapshot) -> GameStateInfo {
+    GameStateInfo {
+        command: command_label(referee.command).to_string(),
+        command_counter: referee.command_counter,
+        stage: None,
+        blue_name: Some(referee.blue.name.clone()),
+        yellow_name: Some(referee.yellow.name.clone()),
+    }
+}
+
+fn command_label(command: referris::Command) -> &'static str {
+    use referris::Command::*;
+    match command {
+        Halt => "HALT",
+        Stop => "STOP",
+        NormalStart => "NORMAL_START",
+        ForceStart => "FORCE_START",
+        PrepareKickoffYellow => "PREPARE_KICKOFF_YELLOW",
+        PrepareKickoffBlue => "PREPARE_KICKOFF_BLUE",
+        PreparePenaltyYellow => "PREPARE_PENALTY_YELLOW",
+        PreparePenaltyBlue => "PREPARE_PENALTY_BLUE",
+        DirectFreeYellow => "DIRECT_FREE_YELLOW",
+        DirectFreeBlue => "DIRECT_FREE_BLUE",
+        IndirectFreeYellow => "INDIRECT_FREE_YELLOW",
+        IndirectFreeBlue => "INDIRECT_FREE_BLUE",
+        TimeoutYellow => "TIMEOUT_YELLOW",
+        TimeoutBlue => "TIMEOUT_BLUE",
+        BallPlacementYellow => "BALL_PLACEMENT_YELLOW",
+        BallPlacementBlue => "BALL_PLACEMENT_BLUE",
+        Unknown => "UNKNOWN",
     }
 }
 

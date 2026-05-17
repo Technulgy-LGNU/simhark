@@ -9,7 +9,8 @@ use simhark::{
 use simhark_sumatra::{SumatraInstance, SumatraLaunchConfig};
 
 fn main() -> Result<()> {
-    let config = WorldConfig::division_b();
+    // Match Sumatra remote client's static default geometry.
+    let config = WorldConfig::division_a();
     let robots_per_team = config.robots_per_team;
     let mut engine = SimulationEngine::new(1, config);
     let mut server = SumatraSimNetServer::bind(SumatraSimNetConfig::default())?;
