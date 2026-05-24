@@ -5,7 +5,7 @@
 //! to the chassis. This avoids the instability of modeling individual wheel
 //! bodies while maintaining behavioral fidelity to grSim's movement model.
 
-use nalgebra::{Isometry3, Point3, SMatrix, SVector, Unit, UnitQuaternion, Vector3 as NVec3};
+use nalgebra::{Isometry3, SMatrix, SVector, Unit, UnitQuaternion, Vector3 as NVec3};
 use rapier3d::prelude::*;
 
 use crate::config::{BALL_COLLISION_SUBSTEPS, RobotConfig, WALL_COUNT, WHEEL_COUNT, WorldConfig};
@@ -156,6 +156,8 @@ pub struct PhysicsWorld {
     yellow_drive: DriveKinematics,
     blue_wheel_speeds: Vec<[f32; WHEEL_COUNT]>,
     yellow_wheel_speeds: Vec<[f32; WHEEL_COUNT]>,
+    blue_drive_enabled: Vec<bool>,
+    yellow_drive_enabled: Vec<bool>,
     blue_drive_params: DriveParams,
     yellow_drive_params: DriveParams,
 
@@ -302,6 +304,8 @@ impl PhysicsWorld {
             yellow_drive: DriveKinematics::new(&config.yellow_robots),
             blue_wheel_speeds: vec![[0.0; WHEEL_COUNT]; config.robots_per_team],
             yellow_wheel_speeds: vec![[0.0; WHEEL_COUNT]; config.robots_per_team],
+            blue_drive_enabled: vec![true; config.robots_per_team],
+            yellow_drive_enabled: vec![true; config.robots_per_team],
             blue_drive_params: DriveParams::from_config(&config.blue_robots),
             yellow_drive_params: DriveParams::from_config(&config.yellow_robots),
             ball_friction: config.ball.friction as f32,
@@ -389,7 +393,7 @@ impl PhysicsWorld {
         orientation: f64,
         bodies: &mut RigidBodySet,
         colliders: &mut ColliderSet,
-        impulse_joints: &mut ImpulseJointSet,
+        _impulse_joints: &mut ImpulseJointSet,
     ) -> RobotHandles {
         // Mirrors grSim: chassis sits with its bottom one wheel-radius above the
         // ground (the wheels live in this gap, but we don't model them as
@@ -540,6 +544,24 @@ impl PhysicsWorld {
         }
     }
 
+    pub fn set_robot_drive_enabled(&mut self, robot: &RobotHandles, enabled: bool) {
+        if let Some(index) = self
+            .blue_robots
+            .iter()
+            .position(|handles| handles.chassis_body == robot.chassis_body)
+        {
+            self.blue_drive_enabled[index] = enabled;
+            return;
+        }
+        if let Some(index) = self
+            .yellow_robots
+            .iter()
+            .position(|handles| handles.chassis_body == robot.chassis_body)
+        {
+            self.yellow_drive_enabled[index] = enabled;
+        }
+    }
+
     pub fn set_robot_ball_contact_enabled(&mut self, robot: &RobotHandles, enabled: bool) {
         let dummy_groups = if enabled {
             dummy_groups()
@@ -582,13 +604,29 @@ impl PhysicsWorld {
     pub fn apply_drive_forces(&mut self, dt_substep: f32) {
         let blue_handles = self.blue_robots.clone();
         let blue_speeds = self.blue_wheel_speeds.clone();
-        for (handle, speeds) in blue_handles.iter().zip(blue_speeds.iter()) {
+        let blue_enabled = self.blue_drive_enabled.clone();
+        for ((handle, speeds), enabled) in blue_handles
+            .iter()
+            .zip(blue_speeds.iter())
+            .zip(blue_enabled.iter())
+        {
+            if !enabled {
+                continue;
+            }
             let (vx, vy, vw) = self.blue_drive.body_velocity(*speeds);
             self.apply_drive_force(handle, vx, vy, vw, self.blue_drive_params, dt_substep);
         }
         let yellow_handles = self.yellow_robots.clone();
         let yellow_speeds = self.yellow_wheel_speeds.clone();
-        for (handle, speeds) in yellow_handles.iter().zip(yellow_speeds.iter()) {
+        let yellow_enabled = self.yellow_drive_enabled.clone();
+        for ((handle, speeds), enabled) in yellow_handles
+            .iter()
+            .zip(yellow_speeds.iter())
+            .zip(yellow_enabled.iter())
+        {
+            if !enabled {
+                continue;
+            }
             let (vx, vy, vw) = self.yellow_drive.body_velocity(*speeds);
             self.apply_drive_force(handle, vx, vy, vw, self.yellow_drive_params, dt_substep);
         }
@@ -716,8 +754,21 @@ impl PhysicsWorld {
         body.set_angvel(Vector::ZERO, true);
     }
 
+    pub fn set_body_velocity(&mut self, handle: RigidBodyHandle, vx: f32, vy: f32, vz: f32) {
+        self.rigid_body_set[handle].set_linvel(Vector::new(vx, vy, vz), true);
+    }
+
+    pub fn set_body_angular_velocity(&mut self, handle: RigidBodyHandle, wx: f32, wy: f32, wz: f32) {
+        self.rigid_body_set[handle].set_angvel(Vector::new(wx, wy, wz), true);
+    }
+
     pub fn ball_mass(&self) -> f32 {
         self.ball_mass
+    }
+
+    pub fn is_robot_ball_contact_enabled(&self, robot: &RobotHandles) -> bool {
+        self.collider_set[robot.dummy_collider].collision_groups() == dummy_groups()
+            && self.collider_set[robot.kicker_collider].collision_groups() == kicker_groups()
     }
 
 }

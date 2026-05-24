@@ -132,6 +132,10 @@ impl GrSimCompatServer {
     }
 
     pub fn step(&mut self, engine: &mut SimulationEngine) -> Result<Vec<WorldState>> {
+        if engine.count() == 0 {
+            return Ok(Vec::new());
+        }
+
         let mut frame_command = WorldCommand {
             blue: self.last_blue_command.clone(),
             yellow: self.last_yellow_command.clone(),
@@ -140,12 +144,25 @@ impl GrSimCompatServer {
 
         self.handle_legacy_packets(&mut frame_command)?;
         self.handle_sim_control_packets(engine, &mut frame_command)?;
-        self.handle_robot_control_packets(TeamColor::Blue, &mut frame_command)?;
-        self.handle_robot_control_packets(TeamColor::Yellow, &mut frame_command)?;
+
+        let world_config = engine.world(0).config.clone();
+        let current_state = engine.world(0).get_state();
+        self.handle_robot_control_packets(
+            TeamColor::Blue,
+            &world_config.blue_robots,
+            &current_state,
+            &mut frame_command,
+        )?;
+        self.handle_robot_control_packets(
+            TeamColor::Yellow,
+            &world_config.yellow_robots,
+            &current_state,
+            &mut frame_command,
+        )?;
 
         let states = engine.step_all_same(&frame_command);
         if let Some(state) = states.first() {
-            self.publish_status_and_vision(state)?;
+            self.publish_status_and_vision(state, &world_config)?;
         }
 
         Ok(states)
@@ -219,6 +236,8 @@ impl GrSimCompatServer {
     fn handle_robot_control_packets(
         &mut self,
         team: TeamColor,
+        robot_cfg: &RobotConfig,
+        state: &WorldState,
         frame_command: &mut WorldCommand,
     ) -> Result<()> {
         let socket = match team {
@@ -231,15 +250,17 @@ impl GrSimCompatServer {
             match socket.recv_from(&mut buf) {
                 Ok((size, peer)) => {
                     let command = RobotControl::decode(&buf[..size]).map_err(decode_error)?;
-                    let commands = world_commands_from_robot_control(command);
+                    let commands = world_commands_from_robot_control(command, robot_cfg);
                     match team {
                         TeamColor::Blue => {
                             self.last_blue_command = commands.clone();
                             frame_command.blue = commands.clone();
+                            self.blue_status_target = Some(peer);
                         }
                         TeamColor::Yellow => {
                             self.last_yellow_command = commands.clone();
                             frame_command.yellow = commands.clone();
+                            self.yellow_status_target = Some(peer);
                         }
                     }
 
@@ -249,7 +270,7 @@ impl GrSimCompatServer {
                             .into_iter()
                             .map(|cmd| RobotFeedback {
                                 id: cmd.id as u32,
-                                dribbler_ball_contact: Some(false),
+                                dribbler_ball_contact: Some(robot_has_ball_contact(state, team, cmd.id)),
                                 custom: None,
                             })
                             .collect(),
@@ -264,10 +285,10 @@ impl GrSimCompatServer {
         }
     }
 
-    fn publish_status_and_vision(&mut self, state: &WorldState) -> Result<()> {
+    fn publish_status_and_vision(&mut self, state: &WorldState, config: &WorldConfig) -> Result<()> {
         self.send_status_if_changed(TeamColor::Blue, &state.blue_robots)?;
         self.send_status_if_changed(TeamColor::Yellow, &state.yellow_robots)?;
-        self.send_vision_packet(state)?;
+        self.send_vision_packet(state, config)?;
         Ok(())
     }
 
@@ -320,7 +341,7 @@ impl GrSimCompatServer {
         Ok(())
     }
 
-    fn send_vision_packet(&self, state: &WorldState) -> Result<()> {
+    fn send_vision_packet(&self, state: &WorldState, config: &WorldConfig) -> Result<()> {
         let now = unix_time_seconds();
         let detection = SslDetectionFrame {
             frame_number: state.frame as u32,
@@ -342,7 +363,7 @@ impl GrSimCompatServer {
 
         let packet = SslWrapperPacket {
             detection: Some(detection),
-            geometry: None,
+            geometry: Some(geometry_from_config(config)),
         };
 
         let mut out = Vec::new();
@@ -425,6 +446,17 @@ fn robot_command_from_grsim(command: GrSimRobotCommand) -> RobotCommand {
     }
 }
 
+fn robot_has_ball_contact(state: &WorldState, team: TeamColor, id: usize) -> bool {
+    let robots = match team {
+        TeamColor::Blue => &state.blue_robots,
+        TeamColor::Yellow => &state.yellow_robots,
+    };
+    robots
+        .iter()
+        .find(|robot| robot.id == id)
+        .is_some_and(|robot| robot.infrared)
+}
+
 fn apply_grsim_replacement(replacement: GrSimReplacement, frame_command: &mut WorldCommand) {
     if let Some(ball) = replacement.ball {
         frame_command.teleport_ball = Some(WorldTeleportBall {
@@ -461,14 +493,14 @@ fn apply_grsim_replacement(replacement: GrSimReplacement, frame_command: &mut Wo
         );
 }
 
-fn world_commands_from_robot_control(control: RobotControl) -> Vec<RobotCommand> {
+fn world_commands_from_robot_control(control: RobotControl, robot_cfg: &RobotConfig) -> Vec<RobotCommand> {
     control
         .robot_commands
         .into_iter()
         .map(|command| {
             let move_command = command
                 .move_command
-                .and_then(move_command_from_robot_control);
+                .and_then(|move_command| move_command_from_robot_control(move_command, robot_cfg));
             RobotCommand {
                 id: command.id as usize,
                 move_command,
@@ -480,14 +512,17 @@ fn world_commands_from_robot_control(control: RobotControl) -> Vec<RobotCommand>
         .collect()
 }
 
-fn move_command_from_robot_control(command: crate::proto::RobotMoveCommand) -> Option<MoveCommand> {
+fn move_command_from_robot_control(
+    command: crate::proto::RobotMoveCommand,
+    robot_cfg: &RobotConfig,
+) -> Option<MoveCommand> {
     match command.command {
         Some(robot_move_command::Command::WheelVelocity(wheels)) => {
             Some(MoveCommand::WheelVelocity([
-                wheels.front_right as f64,
-                wheels.back_right as f64,
-                wheels.back_left as f64,
-                wheels.front_left as f64,
+                wheels.front_right as f64 / robot_cfg.wheel_radius,
+                wheels.front_left as f64 / robot_cfg.wheel_radius,
+                wheels.back_left as f64 / robot_cfg.wheel_radius,
+                wheels.back_right as f64 / robot_cfg.wheel_radius,
             ]))
         }
         Some(robot_move_command::Command::LocalVelocity(vel)) => Some(MoveCommand::LocalVelocity {
@@ -627,9 +662,9 @@ fn apply_robot_spec(config: &mut WorldConfig, robot_spec: RobotSpecs) {
     if let Some(angles) = robot_spec.wheel_angles {
         robot_cfg.wheel_angles = [
             angles.front_right.to_degrees() as f64,
-            angles.back_right.to_degrees() as f64,
-            angles.back_left.to_degrees() as f64,
             angles.front_left.to_degrees() as f64,
+            angles.back_left.to_degrees() as f64,
+            angles.back_right.to_degrees() as f64,
         ];
     }
 }
@@ -713,6 +748,7 @@ fn geometry_field_from_config(field: &FieldConfig) -> SslGeometryFieldSize {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::proto::{MoveWheelVelocity, RobotMoveCommand};
 
     #[test]
     fn translates_legacy_grsim_commands() {
@@ -809,5 +845,48 @@ mod tests {
         assert!((cfg.acc_brake_angular_max - 55.0).abs() < 1e-6);
         assert!((cfg.vel_absolute_max - 4.5).abs() < 1e-6);
         assert!((cfg.vel_angular_max - 18.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn robot_control_wheel_velocity_uses_linear_units_and_internal_order() {
+        let robot_cfg = RobotConfig::default();
+        let move_command = move_command_from_robot_control(
+            RobotMoveCommand {
+                command: Some(robot_move_command::Command::WheelVelocity(MoveWheelVelocity {
+                    front_right: 0.54,
+                    back_right: 1.08,
+                    back_left: 1.62,
+                    front_left: 2.16,
+                })),
+            },
+            &robot_cfg,
+        );
+
+        assert!(matches!(move_command, Some(MoveCommand::WheelVelocity(_))));
+        let Some(MoveCommand::WheelVelocity(wheels)) = move_command else {
+            unreachable!("asserted wheel velocity above");
+        };
+
+        let expected = [
+            0.54 / robot_cfg.wheel_radius,
+            2.16 / robot_cfg.wheel_radius,
+            1.62 / robot_cfg.wheel_radius,
+            1.08 / robot_cfg.wheel_radius,
+        ];
+        for (got, want) in wheels.into_iter().zip(expected) {
+            assert!((got - want).abs() < 1e-9);
+        }
+    }
+
+    #[test]
+    fn geometry_matches_world_config() {
+        let mut config = WorldConfig::division_b();
+        config.field.field_length = 7.5;
+        config.field.field_width = 5.5;
+        let geometry = geometry_from_config(&config);
+        let field = geometry.field;
+        assert_eq!(field.field_length, 7500);
+        assert_eq!(field.field_width, 5500);
+        assert_eq!(field.goal_width, (config.field.goal_width * 1000.0) as i32);
     }
 }

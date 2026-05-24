@@ -170,7 +170,7 @@ pub struct RobotConfig {
     pub kicker_height: f64,
     pub wheel_radius: f64,
     pub wheel_thickness: f64,
-    /// Wheel angles in degrees (front-right, back-right, back-left, front-left).
+    /// Wheel angles in degrees (front-right, front-left, back-left, back-right).
     pub wheel_angles: [f64; WHEEL_COUNT],
 
     // Physics

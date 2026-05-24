@@ -1,9 +1,11 @@
 use std::env;
+use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 
 use anyhow::{Context, Result, bail};
 use serde::{Deserialize, Serialize};
+use tempfile::TempDir;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SumatraLaunchConfig {
@@ -15,6 +17,7 @@ pub struct SumatraLaunchConfig {
     pub auto_ref: bool,
     pub max_speed: bool,
     pub host: Option<String>,
+    pub sim_net_port: Option<u16>,
     pub remote_client: bool,
 }
 
@@ -29,6 +32,7 @@ impl Default for SumatraLaunchConfig {
             auto_ref: false,
             max_speed: true,
             host: None,
+            sim_net_port: None,
             remote_client: false,
         }
     }
@@ -36,6 +40,8 @@ impl Default for SumatraLaunchConfig {
 
 pub struct SumatraInstance {
     child: Child,
+    #[allow(dead_code)]
+    temp_dir: Option<TempDir>,
 }
 
 impl SumatraInstance {
@@ -46,11 +52,24 @@ impl SumatraInstance {
             bail!("missing built Sumatra launcher at {}", launcher.display());
         }
 
+        let mut temp_dir = None;
+        let working_dir = if let Some(port) = config.sim_net_port {
+            let dir = tempfile::Builder::new()
+                .prefix("simhark-sumatra-")
+                .tempdir()
+                .context("failed to create isolated Sumatra config dir")?;
+            write_user_config(dir.path(), port)?;
+            temp_dir = Some(dir);
+            temp_dir.as_ref().expect("temp dir just created").path().to_path_buf()
+        } else {
+            config.repo_root.clone()
+        };
+
         let mut sumatra_args = Vec::new();
         let moduli = if config.remote_client {
-            "sim_client"
+            repo_moduli_path(&config.repo_root, "sim_client")
         } else {
-            &config.moduli
+            repo_moduli_path(&config.repo_root, &config.moduli)
         };
         sumatra_args.push(format!("--moduli={moduli}"));
         if config.headless {
@@ -75,7 +94,7 @@ impl SumatraInstance {
 
         let child = Command::new(&launcher)
             .args(sumatra_args)
-            .current_dir(&config.repo_root)
+            .current_dir(&working_dir)
             .stdin(Stdio::null())
             .stdout(Stdio::inherit())
             .stderr(Stdio::inherit())
@@ -86,7 +105,7 @@ impl SumatraInstance {
                     config.repo_root.display()
                 )
             })?;
-        Ok(Self { child })
+        Ok(Self { child, temp_dir })
     }
 
     pub fn try_wait(&mut self) -> Result<Option<std::process::ExitStatus>> {
@@ -140,4 +159,28 @@ fn sumatra_launcher(repo_root: &Path) -> PathBuf {
         "sumatra"
     };
     repo_root.join("build/install/sumatra/bin").join(name)
+}
+
+fn repo_moduli_path(repo_root: &Path, moduli: &str) -> String {
+    let file_name = if moduli.ends_with(".xml") {
+        moduli.to_string()
+    } else {
+        format!("{moduli}.xml")
+    };
+    repo_root
+        .join("config/moduli")
+        .join(file_name)
+        .to_string_lossy()
+        .into_owned()
+}
+
+fn write_user_config(dir: &Path, sim_net_port: u16) -> Result<()> {
+    let config_dir = dir.join("config");
+    fs::create_dir_all(&config_dir)
+        .with_context(|| format!("failed to create {}", config_dir.display()))?;
+    let content = format!(
+        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<configuration base=\"edu.tigers.sumatra.sim.net.SimNetClient\">\n    <port>{sim_net_port}</port>\n</configuration>\n"
+    );
+    fs::write(config_dir.join("user.xml"), content)
+        .with_context(|| format!("failed to write {}", config_dir.join("user.xml").display()))
 }

@@ -433,6 +433,56 @@ fn test_teleport_robot_applies_requested_velocity() {
 }
 
 #[test]
+fn test_kick_contact_reenables_without_followup_command() {
+    let mut world = World::new(0, WorldConfig::division_a());
+    let robot = world.physics.blue_robots[0].clone();
+
+    world.step(&WorldCommand {
+        teleport_ball: Some(TeleportBall {
+            x: Some(-3.0 + world.config.blue_robots.center_from_kicker + world.config.ball.radius),
+            y: Some(-3.0),
+            z: Some(0.0),
+            vx: Some(0.0),
+            vy: Some(0.0),
+            vz: Some(0.0),
+        }),
+        teleport_robots: vec![TeleportRobot {
+            id: 0,
+            team: TeamColor::Blue,
+            x: Some(-3.0),
+            y: Some(-3.0),
+            orientation: Some(0.0),
+            vx: Some(0.0),
+            vy: Some(0.0),
+            v_angular: Some(0.0),
+            present: Some(true),
+        }],
+        blue: vec![RobotCommand {
+            id: 0,
+            move_command: None,
+            kick_speed: 2.0,
+            kick_angle: 0.0,
+            dribbler_on: true,
+        }],
+        ..Default::default()
+    });
+
+    assert!(
+        !world.physics.is_robot_ball_contact_enabled(&robot),
+        "kick should disable robot-ball contact for the cooldown"
+    );
+
+    for _ in 0..20 {
+        world.step_empty();
+    }
+
+    assert!(
+        world.physics.is_robot_ball_contact_enabled(&robot),
+        "robot-ball contact should re-enable after cooldown even without another command"
+    );
+}
+
+#[test]
 fn test_teleport_robot_off_field() {
     let mut world = World::new(0, WorldConfig::division_a());
 
@@ -674,7 +724,7 @@ fn test_randomized_worlds_diverge() {
 
     let states = engine.get_all_states();
     // With randomization, worlds should diverge
-    let all_same = states.windows(2).all(|w| {
+    let _all_same = states.windows(2).all(|w| {
         (w[0].ball.x - w[1].ball.x).abs() < 1e-10 && (w[0].ball.y - w[1].ball.y).abs() < 1e-10
     });
     // They can still be very similar if ball doesn't move much, but configs differ

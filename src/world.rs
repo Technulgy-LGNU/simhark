@@ -103,6 +103,7 @@ impl World {
         for sim in &mut self.yellow_sims {
             sim.step_kicker();
         }
+        self.refresh_robot_ball_contacts();
 
         self.sim_time += self.config.physics.delta_time;
         self.frame += 1;
@@ -149,12 +150,11 @@ impl World {
             }
 
             let handle = &handle_copies[cmd.id];
-            self.physics
-                .set_robot_ball_contact_enabled(handle, sim.kick_countdown <= 0);
 
             sim.dribbler_on = cmd.dribbler_on;
 
             if let Some(ref mc) = cmd.move_command {
+                self.physics.set_robot_drive_enabled(handle, true);
                 let linvel = self.physics.get_body_linvel(handle.chassis_body);
                 let angvel = self.physics.get_body_angvel(handle.chassis_body);
                 let yaw = self.physics.get_body_yaw(handle.chassis_body) as f64;
@@ -556,34 +556,52 @@ impl World {
             .teleport_body(handle.chassis_body, x, y, start_z);
         self.physics.set_body_yaw(handle.chassis_body, yaw);
         self.physics.reset_body_velocity(handle.chassis_body);
+        self.physics.set_robot_drive_enabled(&handle, false);
         sim.reset_speeds();
 
         if let Some(present) = tr.present {
             sim.is_on = present;
             if !present {
-                let off_x = 100.0 + tr.id as f32;
-                let off_y = 100.0 + tr.team as u8 as f32;
+                let team_lane = match tr.team {
+                    TeamColor::Blue => 0.0,
+                    TeamColor::Yellow => 20.0,
+                };
+                let off_x = 100.0 + team_lane + tr.id as f32 * 2.0;
+                let off_y = 100.0 + team_lane * 0.5;
                 self.physics
                     .teleport_body(handle.chassis_body, off_x, off_y, start_z);
                 self.physics.reset_body_velocity(handle.chassis_body);
+                self.physics.set_robot_drive_enabled(&handle, false);
             }
         }
 
         if sim.is_on && (tr.vx.is_some() || tr.vy.is_some() || tr.v_angular.is_some()) {
-            let vx_world = tr.vx.unwrap_or(0.0);
-            let vy_world = tr.vy.unwrap_or(0.0);
-            let yaw64 = yaw as f64;
-            let vx_local = vx_world * (-yaw64).cos() - vy_world * (-yaw64).sin();
-            let vy_local = vy_world * (-yaw64).cos() + vx_world * (-yaw64).sin();
-            sim.set_local_velocity(
-                vx_local,
-                vy_local,
-                tr.v_angular.unwrap_or(0.0),
+            self.physics.set_body_velocity(
+                handle.chassis_body,
+                tr.vx.unwrap_or(0.0) as f32,
+                tr.vy.unwrap_or(0.0) as f32,
                 0.0,
-                0.0,
-                0.0,
-                self.config.physics.delta_time,
             );
+            self.physics.set_body_angular_velocity(
+                handle.chassis_body,
+                0.0,
+                0.0,
+                tr.v_angular.unwrap_or(0.0) as f32,
+            );
+        }
+    }
+
+    fn refresh_robot_ball_contacts(&mut self) {
+        let blue_handles = self.physics.blue_robots.clone();
+        for (sim, handle) in self.blue_sims.iter().zip(blue_handles.iter()) {
+            self.physics
+                .set_robot_ball_contact_enabled(handle, sim.kick_countdown <= 0);
+        }
+
+        let yellow_handles = self.physics.yellow_robots.clone();
+        for (sim, handle) in self.yellow_sims.iter().zip(yellow_handles.iter()) {
+            self.physics
+                .set_robot_ball_contact_enabled(handle, sim.kick_countdown <= 0);
         }
     }
 
@@ -712,6 +730,10 @@ impl World {
     /// Rebuild the world with a new configuration.
     pub fn reconfigure(&mut self, config: WorldConfig) {
         *self = World::new(self.id, config);
+    }
+
+    pub fn team_configs(&self) -> (&RobotConfig, &RobotConfig) {
+        (&self.config.blue_robots, &self.config.yellow_robots)
     }
 }
 

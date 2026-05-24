@@ -21,9 +21,6 @@ const BALL_RECOVERY_IDLE_FRAMES: u64 = 20;
 const BALL_RECOVERY_STUCK_SPEED: f64 = 0.35;
 
 fn sumatra_remote_world_config() -> WorldConfig {
-    // The remote sim_client path does not receive geometry updates. Sumatra
-    // therefore falls back to its static default geometry (DIV_A), so the
-    // example world must match that geometry to keep goal targeting aligned.
     WorldConfig::division_a()
 }
 

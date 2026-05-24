@@ -8,3 +8,4 @@ build = "build.rs"
 anyhow = "1.0"
 serde = { version = "1.0", features = ["derive"] }
 simhark = { path = "../.." }
+tempfile = "3.23"

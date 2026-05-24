@@ -2,11 +2,11 @@ use std::collections::{HashMap, HashSet};
 use std::env;
 use std::io::{ErrorKind, Read, Result, Write};
 use std::net::{SocketAddr, TcpListener, TcpStream};
-use std::sync::{Mutex, OnceLock};
 
 use prost::Message;
 
 use crate::command::{MoveCommand, RobotCommand, WorldCommand};
+use crate::config::RobotConfig;
 use crate::engine::SimulationEngine;
 use crate::state::{TeamColor, WorldState};
 
@@ -32,12 +32,15 @@ impl Default for SumatraSimNetConfig {
 pub struct SumatraSimNetServer {
     listener: TcpListener,
     clients: Vec<SumatraClient>,
+    previous_ball_sample: Option<PreviousBallSample>,
+    world_index: usize,
 }
 
 struct SumatraClient {
     stream: TcpStream,
     teams: HashSet<TeamColor>,
     read_buf: Vec<u8>,
+    registered: bool,
 }
 
 impl SumatraSimNetServer {
@@ -47,20 +50,28 @@ impl SumatraSimNetServer {
         Ok(Self {
             listener,
             clients: Vec::new(),
+            previous_ball_sample: None,
+            world_index: 0,
         })
+    }
+
+    pub fn bind_for_world(config: SumatraSimNetConfig, world_index: usize) -> Result<Self> {
+        let mut server = Self::bind(config)?;
+        server.world_index = world_index;
+        Ok(server)
     }
 
     pub fn step(&mut self, engine: &mut SimulationEngine) -> Result<Vec<WorldState>> {
         self.accept_new_clients()?;
         let states = engine.get_all_states();
-        if let Some(state) = states.first() {
+        if let Some(state) = states.get(self.world_index) {
             self.publish_state(state)?;
-            let actions = self.receive_actions(state)?;
-            let commands = vec![merge_actions_into_world_command(actions); engine.count()];
-            return Ok(engine.step_with_commands(&commands));
+            let (blue, yellow) = engine.world(self.world_index).team_configs();
+            let actions = self.receive_actions(state, TeamConfigs { blue, yellow })?;
+            let command = merge_actions_into_world_command(actions);
+            return Ok(engine.step_subset(&[self.world_index], &[command]));
         }
-        let commands = vec![WorldCommand::default(); engine.count()];
-        Ok(engine.step_with_commands(&commands))
+        Ok(Vec::new())
     }
 
     pub fn step_with_local_commands(
@@ -70,17 +81,15 @@ impl SumatraSimNetServer {
     ) -> Result<Vec<WorldState>> {
         self.accept_new_clients()?;
         let states = engine.get_all_states();
-        if let Some(state) = states.first() {
+        if let Some(state) = states.get(self.world_index) {
             self.publish_state(state)?;
-            let actions = self.receive_actions(state)?;
-            let mut commands = local_commands.to_vec();
-            if let Some(command) = commands.first_mut() {
-                merge_actions_into_existing_world_command(command, actions);
-            }
-            return Ok(engine.step_with_commands(&commands));
+            let (blue, yellow) = engine.world(self.world_index).team_configs();
+            let actions = self.receive_actions(state, TeamConfigs { blue, yellow })?;
+            let mut command = local_commands.get(self.world_index).cloned().unwrap_or_default();
+            merge_actions_into_existing_world_command(&mut command, actions);
+            return Ok(engine.step_subset(&[self.world_index], &[command]));
         }
-        let commands = local_commands.to_vec();
-        Ok(engine.step_with_commands(&commands))
+        Ok(Vec::new())
     }
 
     pub fn has_clients(&mut self) -> Result<bool> {
@@ -88,23 +97,21 @@ impl SumatraSimNetServer {
         Ok(!self.clients.is_empty())
     }
 
+    pub fn reset_tracking(&mut self) {
+        self.previous_ball_sample = None;
+    }
+
     fn accept_new_clients(&mut self) -> Result<()> {
         loop {
             match self.listener.accept() {
-                Ok((mut stream, _)) => {
+                Ok((stream, _)) => {
                     stream.set_nodelay(true)?;
-                    stream.set_nonblocking(false)?;
-                    let register = read_length_delimited::<SimRegister>(&mut stream)?;
-                    let teams = register
-                        .team_color
-                        .into_iter()
-                        .filter_map(proto_team_to_local)
-                        .collect::<HashSet<_>>();
                     stream.set_nonblocking(true)?;
                     self.clients.push(SumatraClient {
                         stream,
-                        teams,
+                        teams: HashSet::new(),
                         read_buf: Vec::new(),
+                        registered: false,
                     });
                 }
                 Err(err) if err.kind() == ErrorKind::WouldBlock => return Ok(()),
@@ -114,18 +121,29 @@ impl SumatraSimNetServer {
     }
 
     fn publish_state(&mut self, state: &WorldState) -> Result<()> {
-        let request = build_request(state);
-        self.clients
-            .retain_mut(|client| write_length_delimited(&mut client.stream, &request).is_ok());
+        let request = build_request(state, &mut self.previous_ball_sample);
+        self.clients.retain_mut(|client| {
+            match ensure_client_registered(client) {
+                Ok(()) => write_length_delimited(&mut client.stream, &request).is_ok(),
+                Err(err) if err.kind() == ErrorKind::WouldBlock => true,
+                Err(_) => false,
+            }
+        });
         Ok(())
     }
 
     fn receive_actions(
         &mut self,
         state: &WorldState,
+        team_config: TeamConfigs<'_>,
     ) -> Result<HashMap<(TeamColor, usize), RobotCommand>> {
         let mut actions = HashMap::new();
         self.clients.retain_mut(|client| {
+            match ensure_client_registered(client) {
+                Ok(()) => {}
+                Err(err) if err.kind() == ErrorKind::WouldBlock => return true,
+                Err(_) => return false,
+            }
             match read_available(&mut client.stream, &mut client.read_buf) {
                 Ok(false) => false,
                 Ok(true) => loop {
@@ -133,7 +151,7 @@ impl SumatraSimNetServer {
                         Ok(Some(response)) => {
                             for action in response.action {
                                 if let Some((key, command)) =
-                                    decode_action(action, &client.teams, state)
+                                    decode_action(action, &client.teams, state, team_config)
                                 {
                                     actions.insert(key, command);
                                 }
@@ -151,8 +169,14 @@ impl SumatraSimNetServer {
     }
 }
 
-fn build_request(state: &WorldState) -> SimRequest {
-    let ball_motion = estimate_ball_motion(state);
+#[derive(Clone, Copy)]
+struct TeamConfigs<'a> {
+    blue: &'a RobotConfig,
+    yellow: &'a RobotConfig,
+}
+
+fn build_request(state: &WorldState, previous_ball_sample: &mut Option<PreviousBallSample>) -> SimRequest {
+    let ball_motion = estimate_ball_motion(state, previous_ball_sample);
     SimRequest {
         timestamp: (state.sim_time * 1_000_000_000.0) as i64,
         frame_id: state.frame as i64,
@@ -250,6 +274,7 @@ fn decode_action(
     action: SimBotAction,
     registered_teams: &HashSet<TeamColor>,
     state: &WorldState,
+    team_config: TeamConfigs<'_>,
 ) -> Option<((TeamColor, usize), RobotCommand)> {
     let bot_id = action.bot_id?;
     let team = proto_team_to_local(bot_id.color)?;
@@ -276,7 +301,11 @@ fn decode_action(
             for (index, value) in wheel.x.iter().copied().take(4).enumerate() {
                 values[index] = value;
             }
-            let (forward, left, angular) = decode_sumatra_wheel_velocity(values);
+            let robot_cfg = match team {
+                TeamColor::Blue => team_config.blue,
+                TeamColor::Yellow => team_config.yellow,
+            };
+            let (forward, left, angular) = decode_sumatra_wheel_velocity(values, robot_cfg);
             MoveCommand::LocalVelocity {
                 forward,
                 left,
@@ -451,25 +480,15 @@ fn normalize_angle(angle: f64) -> f64 {
     angle.sin().atan2(angle.cos())
 }
 
-fn decode_sumatra_wheel_velocity(wheels: [f64; 4]) -> (f64, f64, f64) {
-    const SUMATRA_WHEEL_RADIUS: f64 = 0.025;
-    const SUMATRA_ROBOT_RADIUS: f64 = 0.076;
-    const FRONT_ANGLE_RAD: f64 = 30.0_f64.to_radians();
-    const BACK_ANGLE_RAD: f64 = 45.0_f64.to_radians();
-
-    let angles = [
-        FRONT_ANGLE_RAD,
-        std::f64::consts::PI - FRONT_ANGLE_RAD,
-        std::f64::consts::PI + BACK_ANGLE_RAD,
-        std::f64::consts::TAU - BACK_ANGLE_RAD,
-    ];
+fn decode_sumatra_wheel_velocity(wheels: [f64; 4], robot_cfg: &RobotConfig) -> (f64, f64, f64) {
+    let angles = robot_cfg.wheel_angles.map(f64::to_radians);
 
     // Matches Sumatra's MatrixMotorModel pseudoinverse mapping.
     let mut d = [[0.0; 3]; 4];
     for (row, angle) in d.iter_mut().zip(angles) {
         row[0] = -angle.sin();
         row[1] = angle.cos();
-        row[2] = SUMATRA_ROBOT_RADIUS;
+        row[2] = robot_cfg.radius;
     }
 
     let mut gram = [[0.0; 3]; 3];
@@ -484,31 +503,7 @@ fn decode_sumatra_wheel_velocity(wheels: [f64; 4]) -> (f64, f64, f64) {
     let inv = invert_3x3(gram).unwrap_or([[0.0; 3]; 3]);
 
     let mut dt_wheels = [0.0; 3];
-    for (row, wheel) in [
-        [
-            -FRONT_ANGLE_RAD.sin(),
-            FRONT_ANGLE_RAD.cos(),
-            SUMATRA_ROBOT_RADIUS,
-        ],
-        [
-            -(std::f64::consts::PI - FRONT_ANGLE_RAD).sin(),
-            (std::f64::consts::PI - FRONT_ANGLE_RAD).cos(),
-            SUMATRA_ROBOT_RADIUS,
-        ],
-        [
-            -(std::f64::consts::PI + BACK_ANGLE_RAD).sin(),
-            (std::f64::consts::PI + BACK_ANGLE_RAD).cos(),
-            SUMATRA_ROBOT_RADIUS,
-        ],
-        [
-            -(std::f64::consts::TAU - BACK_ANGLE_RAD).sin(),
-            (std::f64::consts::TAU - BACK_ANGLE_RAD).cos(),
-            SUMATRA_ROBOT_RADIUS,
-        ],
-    ]
-    .into_iter()
-    .zip(wheels)
-    {
+    for (row, wheel) in d.into_iter().zip(wheels) {
         for i in 0..3 {
             dt_wheels[i] += row[i] * wheel;
         }
@@ -519,7 +514,7 @@ fn decode_sumatra_wheel_velocity(wheels: [f64; 4]) -> (f64, f64, f64) {
         for (j, value) in dt_wheels.iter().enumerate() {
             body[i] += inv[i][j] * value;
         }
-        body[i] *= SUMATRA_WHEEL_RADIUS;
+        body[i] *= robot_cfg.wheel_radius;
     }
 
     (body[0], body[1], body[2])
@@ -566,18 +561,17 @@ struct PreviousBallSample {
     vz: f64,
 }
 
-fn estimate_ball_motion(state: &WorldState) -> BallMotionEstimate {
-    static PREVIOUS_BALL_SAMPLE: OnceLock<Mutex<Option<PreviousBallSample>>> = OnceLock::new();
-    let store = PREVIOUS_BALL_SAMPLE.get_or_init(|| Mutex::new(None));
-    let mut previous = store.lock().expect("ball motion cache poisoned");
-
-    let dt = previous
+fn estimate_ball_motion(
+    state: &WorldState,
+    previous_ball_sample: &mut Option<PreviousBallSample>,
+) -> BallMotionEstimate {
+    let dt = previous_ball_sample
         .as_ref()
         .map(|sample| state.sim_time - sample.sim_time)
         .filter(|dt| *dt > f64::EPSILON)
         .unwrap_or(0.0);
 
-    let acc = previous
+    let acc = previous_ball_sample
         .as_ref()
         .filter(|_| dt > 0.0)
         .map(|sample| {
@@ -589,7 +583,7 @@ fn estimate_ball_motion(state: &WorldState) -> BallMotionEstimate {
         })
         .unwrap_or((0.0, 0.0, 0.0));
 
-    *previous = Some(PreviousBallSample {
+    *previous_ball_sample = Some(PreviousBallSample {
         sim_time: state.sim_time,
         vx: state.ball.vx,
         vy: state.ball.vy,
@@ -605,6 +599,27 @@ fn estimate_ball_motion(state: &WorldState) -> BallMotionEstimate {
     };
 
     BallMotionEstimate { acc, spin }
+}
+
+fn ensure_client_registered(client: &mut SumatraClient) -> Result<()> {
+    if client.registered {
+        return Ok(());
+    }
+
+    read_available(&mut client.stream, &mut client.read_buf)?;
+    let Some(register) = try_take_length_delimited::<SimRegister>(&mut client.read_buf)? else {
+        return Err(std::io::Error::new(
+            ErrorKind::WouldBlock,
+            "waiting for Sumatra registration",
+        ));
+    };
+    client.teams = register
+        .team_color
+        .into_iter()
+        .filter_map(proto_team_to_local)
+        .collect::<HashSet<_>>();
+    client.registered = true;
+    Ok(())
 }
 
 fn merge_actions_into_world_command(
@@ -645,13 +660,6 @@ fn decode_error(err: impl std::error::Error) -> std::io::Error {
     std::io::Error::new(ErrorKind::InvalidData, err.to_string())
 }
 
-fn read_length_delimited<M: Message + Default>(stream: &mut TcpStream) -> Result<M> {
-    let len = read_varint(stream)? as usize;
-    let mut buf = vec![0u8; len];
-    stream.read_exact(&mut buf)?;
-    M::decode(buf.as_slice()).map_err(decode_error)
-}
-
 fn read_available(stream: &mut TcpStream, buffer: &mut Vec<u8>) -> Result<bool> {
     let mut temp = [0u8; 4096];
     loop {
@@ -687,25 +695,6 @@ fn write_length_delimited<M: Message>(stream: &mut TcpStream, message: &M) -> Re
     Ok(())
 }
 
-fn read_varint(stream: &mut TcpStream) -> Result<u64> {
-    let mut value = 0u64;
-    let mut shift = 0u32;
-    loop {
-        let mut byte = [0u8; 1];
-        stream.read_exact(&mut byte)?;
-        value |= ((byte[0] & 0x7f) as u64) << shift;
-        if byte[0] & 0x80 == 0 {
-            return Ok(value);
-        }
-        shift += 7;
-        if shift >= 64 {
-            return Err(std::io::Error::new(
-                ErrorKind::InvalidData,
-                "varint too long",
-            ));
-        }
-    }
-}
 
 fn try_read_varint_from_slice(buf: &[u8]) -> Result<Option<(u64, usize)>> {
     let mut value = 0u64;
@@ -742,4 +731,50 @@ fn write_varint(stream: &mut TcpStream, mut value: u64) -> Result<()> {
         }
     }
     stream.write_all(&buf[..index])
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn decodes_wheel_velocity_with_robot_geometry() {
+        let mut cfg = RobotConfig::default();
+        cfg.radius = 0.09;
+        cfg.wheel_radius = 0.027;
+        cfg.wheel_angles = [30.0, 150.0, 225.0, 315.0];
+
+        let (vx, vy, vw) = decode_sumatra_wheel_velocity([10.0, 10.0, 10.0, 10.0], &cfg);
+        assert!(vx.abs() < 1e-9);
+        assert!(vy.abs() < 1e-9);
+        assert!(vw > 0.0);
+    }
+
+    #[test]
+    fn estimate_ball_motion_is_local_to_server_state() {
+        let state = WorldState {
+            world_id: 0,
+            sim_time: 1.0,
+            frame: 1,
+            ball: crate::state::BallState {
+                x: 0.0,
+                y: 0.0,
+                z: 0.0,
+                vx: 1.0,
+                vy: 0.0,
+                vz: 0.0,
+            },
+            blue_robots: Vec::new(),
+            yellow_robots: Vec::new(),
+            goal_blue: false,
+            goal_yellow: false,
+        };
+
+        let mut first_cache = None;
+        let mut second_cache = None;
+        let _ = estimate_ball_motion(&state, &mut first_cache);
+        let estimate = estimate_ball_motion(&state, &mut second_cache);
+        assert_eq!(estimate.acc, (0.0, 0.0, 0.0));
+        assert!(second_cache.is_some());
+    }
 }

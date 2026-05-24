@@ -15,7 +15,8 @@ pub enum MoveCommand {
     },
     /// Global velocity: vx (m/s), vy (m/s), angular (rad/s).
     GlobalVelocity { vx: f64, vy: f64, angular: f64 },
-    /// Individual wheel speeds in rad/s: [front_right, back_right, back_left, front_left].
+    /// Individual wheel angular speeds in rad/s:
+    /// [front_right, front_left, back_left, back_right].
     WheelVelocity([f64; 4]),
 }
 
@@ -61,8 +62,11 @@ pub struct TeleportRobot {
     pub x: Option<f64>,
     pub y: Option<f64>,
     pub orientation: Option<f64>,
+    /// Optional rigid-body linear velocity in world frame (m/s).
     pub vx: Option<f64>,
+    /// Optional rigid-body linear velocity in world frame (m/s).
     pub vy: Option<f64>,
+    /// Optional rigid-body angular velocity around +Z (rad/s).
     pub v_angular: Option<f64>,
     pub present: Option<bool>,
 }
@@ -79,6 +83,8 @@ pub struct TeleportBall {
 }
 
 /// Commands for a single world in a given step.
+/// Per-robot motion and dribbler commands are latched: omitted robots keep
+/// their previous command until explicitly overridden.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct WorldCommand {
     pub blue: Vec<RobotCommand>,
