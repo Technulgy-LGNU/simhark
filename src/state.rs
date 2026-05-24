@@ -47,7 +47,8 @@ pub struct RobotState {
     pub kick_status: KickStatus,
     /// Whether the robot is active/on.
     pub is_on: bool,
-    /// Individual wheel speeds (rad/s): [front_right, back_right, back_left, front_left].
+    /// Individual wheel angular speeds (rad/s):
+    /// [front_right, front_left, back_left, back_right].
     pub wheel_speeds: [f64; 4],
 }
 

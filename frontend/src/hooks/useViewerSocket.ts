@@ -1,0 +1,155 @@
+import { useEffect, useRef, useState, useCallback } from "react";
+
+export interface FieldConfig {
+  field_length: number;
+  field_width: number;
+  field_line_width: number;
+  field_center_radius: number;
+  penalty_width: number;
+  penalty_depth: number;
+  margin_touch_line: number;
+  margin_goal_line: number;
+  goal_depth: number;
+  goal_width: number;
+  goal_height: number;
+}
+
+export interface BallState {
+  x: number;
+  y: number;
+  z: number;
+  vx: number;
+  vy: number;
+  vz: number;
+}
+
+export interface RobotState {
+  id: number;
+  team: "Blue" | "Yellow";
+  x: number;
+  y: number;
+  z: number;
+  orientation: number;
+  vx: number;
+  vy: number;
+  vz: number;
+  v_angular: number;
+  infrared: boolean;
+  dribbler_on: boolean;
+  kick_status: "NoKick" | "FlatKick" | "ChipKick";
+  is_on: boolean;
+  wheel_speeds: [number, number, number, number];
+}
+
+export interface WorldState {
+  world_id: number;
+  sim_time: number;
+  frame: number;
+  ball: BallState;
+  blue_robots: RobotState[];
+  yellow_robots: RobotState[];
+  goal_blue: boolean;
+  goal_yellow: boolean;
+}
+
+export interface GameStateInfo {
+  command: string;
+  command_counter: number;
+  stage: string | null;
+  blue_name: string | null;
+  yellow_name: string | null;
+  state_counts: Record<string, number>;
+}
+
+export interface GoalSummary {
+  blue: number;
+  yellow: number;
+  blue_active: boolean;
+  yellow_active: boolean;
+}
+
+export interface ControlSnapshot {
+  web_enabled: boolean;
+  running: boolean;
+}
+
+export interface ViewerFrame {
+  world_count: number;
+  selected_world: number;
+  field: FieldConfig;
+  robot_radius: number;
+  ball_radius: number;
+  state: WorldState;
+  game_state: GameStateInfo | null;
+  goals: GoalSummary;
+  control: ControlSnapshot;
+}
+
+const RECONNECT_DELAY_MS = 1000;
+
+export function useViewerSocket(wsPort: number) {
+  const [frame, setFrame] = useState<ViewerFrame | null>(null);
+  const [connected, setConnected] = useState(false);
+  const socketRef = useRef<WebSocket | null>(null);
+  const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const connect = useCallback(() => {
+    if (socketRef.current?.readyState === WebSocket.OPEN) return;
+    const protocol = window.location.protocol === "https:" ? "wss" : "ws";
+    const host = window.location.hostname || "localhost";
+    const url = `${protocol}://${host}:${wsPort}`;
+
+    try {
+      const socket = new WebSocket(url);
+      socketRef.current = socket;
+
+      socket.addEventListener("open", () => setConnected(true));
+
+      socket.addEventListener("message", (event) => {
+        try {
+          const data: ViewerFrame = JSON.parse(event.data);
+          setFrame(data);
+        } catch (err) {
+          console.error("failed to parse viewer frame", err);
+        }
+      });
+
+      socket.addEventListener("close", () => {
+        setConnected(false);
+        socketRef.current = null;
+        reconnectTimerRef.current = setTimeout(connect, RECONNECT_DELAY_MS);
+      });
+
+      socket.addEventListener("error", () => {
+        setConnected(false);
+      });
+    } catch (err) {
+      console.error("failed to open WebSocket", err);
+      reconnectTimerRef.current = setTimeout(connect, RECONNECT_DELAY_MS);
+    }
+  }, [wsPort]);
+
+  useEffect(() => {
+    connect();
+    return () => {
+      if (reconnectTimerRef.current) clearTimeout(reconnectTimerRef.current);
+      socketRef.current?.close();
+    };
+  }, [connect]);
+
+  const selectWorld = useCallback((index: number) => {
+    const socket = socketRef.current;
+    if (socket && socket.readyState === WebSocket.OPEN) {
+      socket.send(`world:${index}`);
+    }
+  }, []);
+
+  const sendControl = useCallback((action: "start" | "stop" | "restart") => {
+    const socket = socketRef.current;
+    if (socket && socket.readyState === WebSocket.OPEN) {
+      socket.send(`control:${action}`);
+    }
+  }, []);
+
+  return { frame, connected, selectWorld, sendControl };
+}
