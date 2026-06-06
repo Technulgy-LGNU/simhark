@@ -10,7 +10,7 @@ members = ["crates/simhark-sumatra"]
 resolver = "2"
 
 [features]
-default = ["viewer"]
+default = []
 viewer = ["dep:tiny_http", "dep:tungstenite"]
 motion-audit = []
 
@@ -44,7 +44,7 @@ anyhow = "1.0"
 criterion = { version = "0.8.2", features = ["html_reports"] }
 approx = "0.5"
 ctrlc = "3.5"
-referris = { path = "../referris", default-features = false }
+referris = { git = "https://github.com/Technulgy-LGNU/referris", default-features = false }
 simhark-sumatra = { path = "crates/simhark-sumatra" }
 
 [build-dependencies]
