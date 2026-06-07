@@ -1,0 +1,11 @@
+[package]
+name = "simhark_faabs"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+simhark = { path = "../.." }
+CrashPilot = { path = "../../../CrashPilot" }
+tf_jetsoncode = { path = "../../../teamfaabs-ssl-robot-code/tf_jetsoncode" }
+
+

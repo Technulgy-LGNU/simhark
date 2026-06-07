@@ -6,7 +6,7 @@ description = "A high-performance parallel RoboCup SSL simulator inspired by grS
 license = "GPL-3.0"
 
 [workspace]
-members = ["crates/simhark-sumatra"]
+members = ["crates/simhark-sumatra", "crates/simhark_faabs"]
 resolver = "2"
 
 [features]
