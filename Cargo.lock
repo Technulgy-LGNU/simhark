@@ -5,6 +5,7 @@ version = 4
 [[package]]
 name = "CrashPilot"
 version = "0.1.0"
+source = "git+https://github.com/Technulgy-LGNU/CrashPilot#f35256186fed27dc5b0a8017a5c85ab6ba2bfaeb"
 dependencies = [
  "anyhow",
  "core_dump",
@@ -306,6 +307,7 @@ checksum = "1d07550c9036bf2ae0c684c4297d503f838287c83c53686d05370d0e139ae570"
 [[package]]
 name = "core_dump"
 version = "0.1.0"
+source = "git+https://github.com/Technulgy-LGNU/CrashPilot#f35256186fed27dc5b0a8017a5c85ab6ba2bfaeb"
 dependencies = [
  "num-traits",
  "prost 0.14.3",
@@ -1994,8 +1996,12 @@ name = "simhark_faabs"
 version = "0.1.0"
 dependencies = [
  "CrashPilot",
+ "futures-util",
+ "prost 0.14.3",
  "simhark",
  "tf_jetsoncode",
+ "tokio",
+ "tokio-tungstenite",
 ]
 
 [[package]]
@@ -2081,6 +2087,7 @@ dependencies = [
 [[package]]
 name = "tf_jetsoncode"
 version = "0.1.0"
+source = "git+https://github.com/Technulgy-LGNU/teamfaabs-ssl-robot-code#bd20f12df74fe942b6fdac0d69fc656a902e3dcc"
 dependencies = [
  "anyhow",
  "hidapi",
