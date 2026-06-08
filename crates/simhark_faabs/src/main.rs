@@ -26,7 +26,7 @@ fn run() {
     loop {
         let mut command = WorldCommand::default();
 
-        faabs.step(&state, &mut command);
+        faabs.step(&state, &mut command, None);
 
         // dbg!(&command);
 

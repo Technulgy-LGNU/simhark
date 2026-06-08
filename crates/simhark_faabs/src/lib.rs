@@ -69,8 +69,9 @@ impl Faabs {
         }
     }
 
-    pub fn step(&mut self, state: &WorldState, command: &mut WorldCommand) {
+    pub fn step(&mut self, state: &WorldState, command: &mut WorldCommand, referee: Option<::CrashPilot::core_dump::proto::Referee>) {
         world_state_to_cp_events(&mut self.events, state);
+        self.events.gc = referee;
 
         #[cfg(feature = "interface")]
         {
