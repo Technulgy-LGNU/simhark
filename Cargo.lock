@@ -8,7 +8,7 @@ version = "0.1.0"
 source = "git+https://github.com/Technulgy-LGNU/CrashPilot#f35256186fed27dc5b0a8017a5c85ab6ba2bfaeb"
 dependencies = [
  "anyhow",
- "core_dump",
+ "core_dump 0.1.0 (git+https://github.com/Technulgy-LGNU/CrashPilot)",
  "futures-util",
  "http-body-util",
  "hyper",
@@ -303,6 +303,16 @@ name = "colorchoice"
 version = "1.0.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1d07550c9036bf2ae0c684c4297d503f838287c83c53686d05370d0e139ae570"
+
+[[package]]
+name = "core_dump"
+version = "0.1.0"
+dependencies = [
+ "num-traits",
+ "prost 0.14.3",
+ "prost-types 0.14.3",
+ "serde",
+]
 
 [[package]]
 name = "core_dump"
@@ -1743,6 +1753,20 @@ dependencies = [
 [[package]]
 name = "referris"
 version = "0.1.0"
+dependencies = [
+ "core_dump 0.1.0",
+ "loguna",
+ "prost 0.14.3",
+ "serde",
+ "serde_json",
+ "simhark 0.1.0 (git+https://github.com/Technulgy-LGNU/simhark)",
+ "socket2 0.5.10",
+ "thiserror",
+]
+
+[[package]]
+name = "referris"
+version = "0.1.0"
 source = "git+https://github.com/Technulgy-LGNU/referris#6c3523ea92a87da72b1abd69b2d4c38578a85622"
 dependencies = [
  "loguna",
@@ -1753,6 +1777,14 @@ dependencies = [
  "serde_json",
  "socket2 0.5.10",
  "thiserror",
+]
+
+[[package]]
+name = "referris-simhark"
+version = "0.1.0"
+dependencies = [
+ "referris 0.1.0",
+ "simhark 0.1.0 (git+https://github.com/Technulgy-LGNU/simhark)",
 ]
 
 [[package]]
@@ -1973,7 +2005,7 @@ dependencies = [
  "rand_chacha 0.10.0",
  "rapier3d",
  "rayon",
- "referris",
+ "referris 0.1.0 (git+https://github.com/Technulgy-LGNU/referris)",
  "serde",
  "serde_json",
  "simhark-sumatra",
@@ -1982,12 +2014,33 @@ dependencies = [
 ]
 
 [[package]]
+name = "simhark"
+version = "0.1.0"
+source = "git+https://github.com/Technulgy-LGNU/simhark#e02ccf7a15e5d8eefd399c0d78cab204414537a7"
+dependencies = [
+ "crossbeam-channel",
+ "env_logger",
+ "log",
+ "nalgebra",
+ "parking_lot",
+ "prost 0.14.3",
+ "prost-build",
+ "prost-types 0.14.3",
+ "rand 0.10.0",
+ "rand_chacha 0.10.0",
+ "rapier3d",
+ "rayon",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "simhark-sumatra"
 version = "0.1.0"
 dependencies = [
  "anyhow",
  "serde",
- "simhark",
+ "simhark 0.1.0",
  "tempfile",
 ]
 
@@ -1998,7 +2051,9 @@ dependencies = [
  "CrashPilot",
  "futures-util",
  "prost 0.14.3",
- "simhark",
+ "referris 0.1.0",
+ "referris-simhark",
+ "simhark 0.1.0",
  "tf_jetsoncode",
  "tokio",
  "tokio-tungstenite",

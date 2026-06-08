@@ -1,4 +1,5 @@
 use std::thread;
+use referris::RefereeState;
 use simhark::{SimulationEngine, WorldCommand, WorldConfig};
 use simhark_faabs::Faabs;
 
@@ -17,6 +18,8 @@ fn run() {
 
     let mut engine = SimulationEngine::new(1, config.clone());
 
+    let mut referris = referris_simhark::ReferrisDriver::new(&config);
+
     let mut faabs = Faabs::with_interface(6);
 
     let command = WorldCommand::default();
@@ -24,9 +27,12 @@ fn run() {
     let mut state = engine.step_with_commands(&[command]).remove(0);
 
     loop {
+        let _ = referris.step(&state);
+        let referee = referris.autoref_for(state.world_id).referee_state().map(RefereeState::to_referee);
+
         let mut command = WorldCommand::default();
 
-        faabs.step(&state, &mut command, None);
+        faabs.step(&state, &mut command, referee);
 
         // dbg!(&command);
 
