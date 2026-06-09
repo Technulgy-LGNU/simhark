@@ -8,7 +8,7 @@ use CrashPilot::core_dump::proto::{
     Team, TrackedBall, TrackedFrame, TrackedRobot, TrackerWrapperPacket, Vector2, Vector3,
 };
 use tf_jetsoncode::{
-    CpBall, CpCommand, CpRobot, CpTrackedRobot, CpVector2, TeensyRecMSG,
+    CpBall, CpCommand, CpRobot, CpTrackedRobot, CpVector2, TeensyRecMSG, proto::CpInfos,
 };
 
 pub fn world_state_to_cp_events(events: &mut ::CrashPilot::Events, state: &WorldState) {
@@ -160,6 +160,16 @@ fn cp_robot_msg(msg: core_dump::proto::CpRobot) -> CpRobot {
         robots_yellow: msg.robots_yellow.into_iter().map(cp_tracked_robot).collect(),
         robots_blue: msg.robots_blue.into_iter().map(cp_tracked_robot).collect(),
         cmd: cp_command(msg.cmd),
+        infos: CpInfos {
+            team_color: msg.infos.team_site,
+            team_site: msg.infos.team_site,
+            width: msg.infos.width,
+            height: msg.infos.height,
+            runoff_width: msg.infos.runoff_width,
+            penalty_area_width: msg.infos.penalty_area_width,
+            penalty_area_height: msg.infos.penalty_area_height,
+            goal_width: msg.infos.goal_width,
+        },
     }
 }
 
