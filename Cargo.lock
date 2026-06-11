@@ -883,11 +883,12 @@ checksum = "5e5032e24019045c762d3c0f28f5b6b8bbf38563a65908389bf7978758920897"
 [[package]]
 name = "loguna"
 version = "0.1.0"
+source = "git+https://github.com/Technulgy-LGNU/loguna#35dbc333412512c053b2f3711d2cf5ab0d9580ef"
 dependencies = [
  "byteorder",
  "flate2",
- "prost 0.13.5",
- "prost-build",
+ "prost 0.14.3",
+ "prost-build 0.14.3",
  "thiserror",
 ]
 
@@ -1160,6 +1161,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "petgraph"
+version = "0.8.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8701b58ea97060d5e5b155d383a69952a60943f0e6dfe30b04c287beb0b27455"
+dependencies = [
+ "fixedbitset",
+ "hashbrown 0.15.5",
+ "indexmap",
+]
+
+[[package]]
 name = "plotters"
 version = "0.3.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1280,10 +1292,29 @@ dependencies = [
  "log",
  "multimap",
  "once_cell",
- "petgraph",
+ "petgraph 0.7.1",
  "prettyplease",
  "prost 0.13.5",
  "prost-types 0.13.5",
+ "regex",
+ "syn",
+ "tempfile",
+]
+
+[[package]]
+name = "prost-build"
+version = "0.14.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "343d3bd7056eda839b03204e68deff7d1b13aba7af2b2fd16890697274262ee7"
+dependencies = [
+ "heck",
+ "itertools",
+ "log",
+ "multimap",
+ "petgraph 0.8.3",
+ "prettyplease",
+ "prost 0.14.3",
+ "prost-types 0.14.3",
  "regex",
  "syn",
  "tempfile",
@@ -1542,7 +1573,7 @@ version = "0.1.0"
 dependencies = [
  "loguna",
  "prost 0.13.5",
- "prost-build",
+ "prost-build 0.13.5",
  "protoc-bin-vendored",
  "serde",
  "serde_json",
@@ -1744,7 +1775,7 @@ dependencies = [
  "nalgebra",
  "parking_lot",
  "prost 0.14.3",
- "prost-build",
+ "prost-build 0.13.5",
  "prost-types 0.14.3",
  "rand 0.10.0",
  "rand_chacha 0.10.0",
