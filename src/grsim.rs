@@ -270,7 +270,9 @@ impl GrSimCompatServer {
                             .into_iter()
                             .map(|cmd| RobotFeedback {
                                 id: cmd.id as u32,
-                                dribbler_ball_contact: Some(robot_has_ball_contact(state, team, cmd.id)),
+                                dribbler_ball_contact: Some(robot_has_ball_contact(
+                                    state, team, cmd.id,
+                                )),
                                 custom: None,
                             })
                             .collect(),
@@ -285,7 +287,11 @@ impl GrSimCompatServer {
         }
     }
 
-    fn publish_status_and_vision(&mut self, state: &WorldState, config: &WorldConfig) -> Result<()> {
+    fn publish_status_and_vision(
+        &mut self,
+        state: &WorldState,
+        config: &WorldConfig,
+    ) -> Result<()> {
         self.send_status_if_changed(TeamColor::Blue, &state.blue_robots)?;
         self.send_status_if_changed(TeamColor::Yellow, &state.yellow_robots)?;
         self.send_vision_packet(state, config)?;
@@ -493,7 +499,10 @@ fn apply_grsim_replacement(replacement: GrSimReplacement, frame_command: &mut Wo
         );
 }
 
-fn world_commands_from_robot_control(control: RobotControl, robot_cfg: &RobotConfig) -> Vec<RobotCommand> {
+fn world_commands_from_robot_control(
+    control: RobotControl,
+    robot_cfg: &RobotConfig,
+) -> Vec<RobotCommand> {
     control
         .robot_commands
         .into_iter()
@@ -852,12 +861,14 @@ mod tests {
         let robot_cfg = RobotConfig::default();
         let move_command = move_command_from_robot_control(
             RobotMoveCommand {
-                command: Some(robot_move_command::Command::WheelVelocity(MoveWheelVelocity {
-                    front_right: 0.54,
-                    back_right: 1.08,
-                    back_left: 1.62,
-                    front_left: 2.16,
-                })),
+                command: Some(robot_move_command::Command::WheelVelocity(
+                    MoveWheelVelocity {
+                        front_right: 0.54,
+                        back_right: 1.08,
+                        back_left: 1.62,
+                        front_left: 2.16,
+                    },
+                )),
             },
             &robot_cfg,
         );

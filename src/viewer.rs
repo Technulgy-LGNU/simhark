@@ -14,7 +14,7 @@ use tiny_http::{Header, Method, Response, Server, StatusCode};
 use tungstenite::{Message, accept};
 
 use crate::config::{FieldConfig, WorldConfig};
-use crate::state::WorldState;
+use crate::state::{BallState, WorldState};
 
 #[derive(Debug, Clone, Copy)]
 pub struct ViewerConfig {
@@ -159,6 +159,7 @@ pub struct ViewerServer {
     latest_frame: Arc<Mutex<Option<String>>>,
     game_state: Arc<Mutex<GameStateTracker>>,
     goal_tracker: Arc<Mutex<GoalTracker>>,
+    ghost_ball: Arc<Mutex<Option<BallState>>>,
     control: Arc<WebControlState>,
     _http_thread: thread::JoinHandle<()>,
     _ws_thread: thread::JoinHandle<()>,
@@ -175,6 +176,7 @@ struct ViewerFrame<'a> {
     game_state: Option<PublishedGameState<'a>>,
     goals: GoalSummary,
     control: ControlSnapshot,
+    ghost_ball: Option<&'a BallState>,
 }
 
 impl ViewerServer {
@@ -193,6 +195,7 @@ impl ViewerServer {
         let latest_frame = Arc::new(Mutex::new(None));
         let game_state = Arc::new(Mutex::new(GameStateTracker::default()));
         let goal_tracker = Arc::new(Mutex::new(GoalTracker::default()));
+        let ghost_ball = Arc::new(Mutex::new(None));
         let control = Arc::new(WebControlState::default());
         // When web control is disabled the simulator is considered always
         // running, so callers that don't opt in see the legacy behaviour.
@@ -221,10 +224,18 @@ impl ViewerServer {
             latest_frame,
             game_state,
             goal_tracker,
+            ghost_ball,
             control,
             _http_thread: http_thread,
             _ws_thread: ws_thread,
         })
+    }
+
+    /// Set or clear the "ghost ball" — a translucent overlay rendered at an
+    /// arbitrary position. Useful for visualising predicted ball trajectories
+    /// alongside the simulated ball. Pass `None` to clear.
+    pub fn set_ghost_ball(&self, ball: Option<BallState>) {
+        *self.ghost_ball.lock() = ball;
     }
 
     /// Opt in to web-driven start/stop/restart. The simulator starts in the
@@ -233,7 +244,9 @@ impl ViewerServer {
     pub fn enable_web_control(&self) {
         self.control.enabled.store(true, Ordering::Relaxed);
         self.control.running.store(false, Ordering::Relaxed);
-        self.control.restart_requested.store(false, Ordering::Relaxed);
+        self.control
+            .restart_requested
+            .store(false, Ordering::Relaxed);
     }
 
     /// True when the simulator should keep stepping. Always true when web
@@ -266,6 +279,7 @@ impl ViewerServer {
         let game_state_guard = self.game_state.lock();
         let mut goal_guard = self.goal_tracker.lock();
         goal_guard.observe(state);
+        let ghost_guard = self.ghost_ball.lock();
         let frame = ViewerFrame {
             world_count: self.world_count,
             selected_world: self.selected_world(),
@@ -284,6 +298,7 @@ impl ViewerServer {
                 web_enabled: self.control.enabled.load(Ordering::Relaxed),
                 running: self.control.running.load(Ordering::Relaxed),
             },
+            ghost_ball: ghost_guard.as_ref(),
         };
 
         if let Ok(json) = serde_json::to_string(&frame) {
@@ -371,11 +386,7 @@ fn run_websocket_server(
     }
 }
 
-fn handle_client_message(
-    message: &str,
-    selected_world: &AtomicUsize,
-    control: &WebControlState,
-) {
+fn handle_client_message(message: &str, selected_world: &AtomicUsize, control: &WebControlState) {
     if let Some(value) = message.strip_prefix("world:") {
         if let Ok(index) = value.trim().parse::<usize>() {
             selected_world.store(index, Ordering::Relaxed);

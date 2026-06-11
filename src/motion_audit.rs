@@ -167,7 +167,7 @@ impl MotionAuditor {
             push_history(
                 self.robot_history
                     .entry((robot.team, robot.id))
-                .or_default(),
+                    .or_default(),
                 MotionSample {
                     t: current.sim_time,
                     x: robot.x,
@@ -575,7 +575,9 @@ mod tests {
 
         let findings = audit_world(&current, Some(&previous), &config);
         assert!(
-            findings.iter().any(|finding| finding.kind == "ball-random-force"),
+            findings
+                .iter()
+                .any(|finding| finding.kind == "ball-random-force"),
             "expected ball-random-force finding, got {findings:?}"
         );
     }
@@ -612,7 +614,9 @@ mod tests {
 
         let findings = audit_world(&current, Some(&previous), &config);
         assert!(
-            findings.iter().all(|finding| finding.kind != "ball-random-force"),
+            findings
+                .iter()
+                .all(|finding| finding.kind != "ball-random-force"),
             "unexpected ball-random-force finding: {findings:?}"
         );
     }
@@ -711,7 +715,12 @@ fn detect_line_oscillation(history: &VecDeque<MotionSample>) -> Option<&'static 
     None
 }
 
-fn detect_wobble(history: &VecDeque<MotionSample>, speed_limit: f64, acc_limit: f64, jerk_limit: f64) -> Option<String> {
+fn detect_wobble(
+    history: &VecDeque<MotionSample>,
+    speed_limit: f64,
+    acc_limit: f64,
+    jerk_limit: f64,
+) -> Option<String> {
     if history.len() < 4 {
         return None;
     }
@@ -725,16 +734,24 @@ fn detect_wobble(history: &VecDeque<MotionSample>, speed_limit: f64, acc_limit: 
     let low_motion_zone = [a.speed, b.speed, c.speed, d.speed]
         .into_iter()
         .all(|speed| speed <= speed_limit);
-    let acc_spike = [b.acc, c.acc, d.acc].into_iter().any(|acc| acc >= acc_limit);
+    let acc_spike = [b.acc, c.acc, d.acc]
+        .into_iter()
+        .any(|acc| acc >= acc_limit);
     let jerk = compute_jerk([a, b, c, d]);
     let jerk_spike = jerk >= jerk_limit;
-    let velocity_flip = sign_flip_count([a.vx, b.vx, c.vx, d.vx]) + sign_flip_count([a.vy, b.vy, c.vy, d.vy]) >= 2;
+    let velocity_flip =
+        sign_flip_count([a.vx, b.vx, c.vx, d.vx]) + sign_flip_count([a.vy, b.vy, c.vy, d.vy]) >= 2;
     let acceleration_flip = accel_sign_flip_count([b.vx - a.vx, c.vx - b.vx, d.vx - c.vx])
         + accel_sign_flip_count([b.vy - a.vy, c.vy - b.vy, d.vy - c.vy])
         >= 2;
-    let confined = axis_range([a.x, b.x, c.x, d.x]) <= 0.12 && axis_range([a.y, b.y, c.y, d.y]) <= 0.12;
+    let confined =
+        axis_range([a.x, b.x, c.x, d.x]) <= 0.12 && axis_range([a.y, b.y, c.y, d.y]) <= 0.12;
 
-    if confined && low_motion_zone && (acc_spike || jerk_spike) && (velocity_flip || acceleration_flip) {
+    if confined
+        && low_motion_zone
+        && (acc_spike || jerk_spike)
+        && (velocity_flip || acceleration_flip)
+    {
         return Some(format!(
             "settling wobble: speed=[{:.2},{:.2},{:.2},{:.2}] acc=[{:.2},{:.2},{:.2}] jerk={:.2}",
             a.speed, b.speed, c.speed, d.speed, b.acc, c.acc, d.acc, jerk,

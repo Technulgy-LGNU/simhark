@@ -85,7 +85,10 @@ impl SumatraSimNetServer {
             self.publish_state(state)?;
             let (blue, yellow) = engine.world(self.world_index).team_configs();
             let actions = self.receive_actions(state, TeamConfigs { blue, yellow })?;
-            let mut command = local_commands.get(self.world_index).cloned().unwrap_or_default();
+            let mut command = local_commands
+                .get(self.world_index)
+                .cloned()
+                .unwrap_or_default();
             merge_actions_into_existing_world_command(&mut command, actions);
             return Ok(engine.step_subset(&[self.world_index], &[command]));
         }
@@ -122,13 +125,12 @@ impl SumatraSimNetServer {
 
     fn publish_state(&mut self, state: &WorldState) -> Result<()> {
         let request = build_request(state, &mut self.previous_ball_sample);
-        self.clients.retain_mut(|client| {
-            match ensure_client_registered(client) {
+        self.clients
+            .retain_mut(|client| match ensure_client_registered(client) {
                 Ok(()) => write_length_delimited(&mut client.stream, &request).is_ok(),
                 Err(err) if err.kind() == ErrorKind::WouldBlock => true,
                 Err(_) => false,
-            }
-        });
+            });
         Ok(())
     }
 
@@ -175,7 +177,10 @@ struct TeamConfigs<'a> {
     yellow: &'a RobotConfig,
 }
 
-fn build_request(state: &WorldState, previous_ball_sample: &mut Option<PreviousBallSample>) -> SimRequest {
+fn build_request(
+    state: &WorldState,
+    previous_ball_sample: &mut Option<PreviousBallSample>,
+) -> SimRequest {
     let ball_motion = estimate_ball_motion(state, previous_ball_sample);
     SimRequest {
         timestamp: (state.sim_time * 1_000_000_000.0) as i64,
@@ -367,10 +372,7 @@ fn decode_velocity_action(
             let (vx, vy) = damped_global_velocity(
                 (target_x - robot.x, target_y - robot.y),
                 (robot.vx, robot.vy),
-                action
-                    .primary_direction
-                    .as_ref()
-                    .map(|dir| (dir.x, dir.y)),
+                action.primary_direction.as_ref().map(|dir| (dir.x, dir.y)),
                 limits.map_or(3.0, |limits| limits.vel_max),
                 limits.map_or(4.0, |limits| limits.acc_max),
             );
@@ -694,7 +696,6 @@ fn write_length_delimited<M: Message>(stream: &mut TcpStream, message: &M) -> Re
     stream.write_all(&payload)?;
     Ok(())
 }
-
 
 fn try_read_varint_from_slice(buf: &[u8]) -> Result<Option<(u64, usize)>> {
     let mut value = 0u64;

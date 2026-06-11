@@ -60,7 +60,11 @@ impl SumatraInstance {
                 .context("failed to create isolated Sumatra config dir")?;
             write_user_config(dir.path(), port)?;
             temp_dir = Some(dir);
-            temp_dir.as_ref().expect("temp dir just created").path().to_path_buf()
+            temp_dir
+                .as_ref()
+                .expect("temp dir just created")
+                .path()
+                .to_path_buf()
         } else {
             config.repo_root.clone()
         };
