@@ -1,6 +1,6 @@
-use simhark::command::{MoveCommand, RobotCommand};
 use simhark::WorldCommand;
-use tf_jetsoncode::{send_flags, CpState, TeensySendMsg};
+use simhark::command::{MoveCommand, RobotCommand};
+use tf_jetsoncode::{CpState, TeensySendMsg, send_flags};
 
 const HEADING_GAIN: f64 = 6.0;
 const MAX_ANGULAR: f64 = 20.0;
@@ -30,9 +30,8 @@ pub fn run_sim_action(robot_id: u32, teensy: TeensySendMsg, command: &mut WorldC
     let vx = speed_mps * dir_rad.cos();
     let vy = speed_mps * dir_rad.sin();
 
-    let heading_error = wrap_to_pi(
-        (teensy.orient as f64).to_radians() - (teensy.self_orient as f64).to_radians(),
-    );
+    let heading_error =
+        wrap_to_pi((teensy.orient as f64).to_radians() - (teensy.self_orient as f64).to_radians());
     let angular = (heading_error * HEADING_GAIN).clamp(-MAX_ANGULAR, MAX_ANGULAR);
 
     let kicking = teensy.flags & (send_flags::KICK | send_flags::CHIP) != 0;

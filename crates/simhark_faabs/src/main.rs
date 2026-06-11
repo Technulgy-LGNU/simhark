@@ -1,7 +1,7 @@
-use std::thread;
 use referris::RefereeState;
 use simhark::{SimulationEngine, WorldCommand, WorldConfig};
 use simhark_faabs::Faabs;
+use std::thread;
 
 fn main() {
     tokio::runtime::Builder::new_multi_thread()
@@ -28,7 +28,10 @@ fn run() {
 
     loop {
         let _ = referris.step(&state);
-        let referee = referris.autoref_for(state.world_id).referee_state().map(RefereeState::to_referee);
+        let referee = referris
+            .autoref_for(state.world_id)
+            .referee_state()
+            .map(RefereeState::to_referee);
 
         let mut command = WorldCommand::default();
 

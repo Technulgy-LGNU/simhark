@@ -684,16 +684,17 @@ impl World {
                 // has snapped the ball to a single holder, reporting only the
                 // raw geometry can flicker false and stall the kick state
                 // machine upstream.
-                let infrared = sim.holding_ball || is_ball_touching_kicker(
-                    [ball_pos.x as f64, ball_pos.y as f64, ball_pos.z as f64],
-                    contact_origin,
-                    dir,
-                    robot_cfg.center_from_kicker,
-                    robot_cfg.radius,
-                    robot_cfg.kicker_height,
-                    self.config.ball.radius,
-                    0.02,
-                );
+                let infrared = sim.holding_ball
+                    || is_ball_touching_kicker(
+                        [ball_pos.x as f64, ball_pos.y as f64, ball_pos.z as f64],
+                        contact_origin,
+                        dir,
+                        robot_cfg.center_from_kicker,
+                        robot_cfg.radius,
+                        robot_cfg.kicker_height,
+                        self.config.ball.radius,
+                        0.02,
+                    );
 
                 let kick_status = match sim.kick_type {
                     KickType::None => KickStatus::NoKick,

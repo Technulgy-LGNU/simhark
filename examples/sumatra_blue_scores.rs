@@ -43,7 +43,9 @@ fn main() -> Result<()> {
             ..Default::default()
         };
 
-        let state = server.step_with_local_commands(&mut engine, &[command])?.remove(0);
+        let state = server
+            .step_with_local_commands(&mut engine, &[command])?
+            .remove(0);
         let blue_near_ball = state
             .blue_robots
             .iter()

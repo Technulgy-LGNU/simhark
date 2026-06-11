@@ -233,7 +233,9 @@ impl ViewerServer {
     pub fn enable_web_control(&self) {
         self.control.enabled.store(true, Ordering::Relaxed);
         self.control.running.store(false, Ordering::Relaxed);
-        self.control.restart_requested.store(false, Ordering::Relaxed);
+        self.control
+            .restart_requested
+            .store(false, Ordering::Relaxed);
     }
 
     /// True when the simulator should keep stepping. Always true when web
@@ -371,11 +373,7 @@ fn run_websocket_server(
     }
 }
 
-fn handle_client_message(
-    message: &str,
-    selected_world: &AtomicUsize,
-    control: &WebControlState,
-) {
+fn handle_client_message(message: &str, selected_world: &AtomicUsize, control: &WebControlState) {
     if let Some(value) = message.strip_prefix("world:") {
         if let Ok(index) = value.trim().parse::<usize>() {
             selected_world.store(index, Ordering::Relaxed);

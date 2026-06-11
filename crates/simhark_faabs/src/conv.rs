@@ -1,12 +1,12 @@
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use simhark::WorldState;
-use simhark::state::{KickStatus, RobotState};
 use CrashPilot::core_dump;
 use CrashPilot::core_dump::proto::{
     self as cp_proto, SslDetectionBall, SslDetectionFrame, SslDetectionRobot, SslWrapperPacket,
     Team, TrackedBall, TrackedFrame, TrackedRobot, TrackerWrapperPacket, Vector2, Vector3,
 };
+use simhark::WorldState;
+use simhark::state::{KickStatus, RobotState};
 use tf_jetsoncode::{
     CpBall, CpCommand, CpRobot, CpTrackedRobot, CpVector2, TeensyRecMSG, proto::CpInfos,
 };
@@ -96,28 +96,35 @@ fn detection_robots(robots: &[RobotState]) -> Vec<SslDetectionRobot> {
 }
 
 fn tracked_robots(out: &mut Vec<TrackedRobot>, robots: &[RobotState], team: Team) {
-    out.extend(robots.iter().filter(|robot| robot.is_on).map(|robot| {
-        TrackedRobot {
-            robot_id: cp_proto::RobotId {
-                id: Some(robot.id as u32),
-                team: Some(team as i32),
-            },
-            pos: Vector2 {
-                x: robot.x as f32,
-                y: robot.y as f32,
-            },
-            orientation: robot.orientation as f32,
-            vel: Some(Vector2 {
-                x: robot.vx as f32,
-                y: robot.vy as f32,
+    out.extend(
+        robots
+            .iter()
+            .filter(|robot| robot.is_on)
+            .map(|robot| TrackedRobot {
+                robot_id: cp_proto::RobotId {
+                    id: Some(robot.id as u32),
+                    team: Some(team as i32),
+                },
+                pos: Vector2 {
+                    x: robot.x as f32,
+                    y: robot.y as f32,
+                },
+                orientation: robot.orientation as f32,
+                vel: Some(Vector2 {
+                    x: robot.vx as f32,
+                    y: robot.vy as f32,
+                }),
+                vel_angular: Some(robot.v_angular as f32),
+                visibility: Some(1.0),
             }),
-            vel_angular: Some(robot.v_angular as f32),
-            visibility: Some(1.0),
-        }
-    }));
+    );
 }
 
-pub fn robot_events(robot: u32, cp_data: CrashPilot::RobotData, state: &WorldState) -> tf_jetsoncode::Events {
+pub fn robot_events(
+    robot: u32,
+    cp_data: CrashPilot::RobotData,
+    state: &WorldState,
+) -> tf_jetsoncode::Events {
     let Some(robot) = state.yellow_robots.iter().find(|r| r.id == robot as usize) else {
         panic!("Robot with id {} not found in world state", robot);
     };
@@ -146,8 +153,7 @@ pub fn robot_events(robot: u32, cp_data: CrashPilot::RobotData, state: &WorldSta
             flags,
             batt_level: 0,
             current: 0,
-        })
-
+        }),
     }
 }
 
@@ -157,7 +163,11 @@ fn cp_robot_msg(msg: core_dump::proto::CpRobot) -> CpRobot {
         timestamp: msg.timestamp,
         packet_id: msg.packet_id,
         ball: cp_ball(msg.ball),
-        robots_yellow: msg.robots_yellow.into_iter().map(cp_tracked_robot).collect(),
+        robots_yellow: msg
+            .robots_yellow
+            .into_iter()
+            .map(cp_tracked_robot)
+            .collect(),
         robots_blue: msg.robots_blue.into_iter().map(cp_tracked_robot).collect(),
         cmd: cp_command(msg.cmd),
         infos: CpInfos {

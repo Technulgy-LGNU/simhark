@@ -16,7 +16,9 @@ fn main() -> Result<()> {
     let mut servers = [
         SumatraSimNetServer::bind_for_world(
             SumatraSimNetConfig {
-                bind_addr: format!("127.0.0.1:{}", BASE_PORT).parse().expect("valid port"),
+                bind_addr: format!("127.0.0.1:{}", BASE_PORT)
+                    .parse()
+                    .expect("valid port"),
             },
             0,
         )?,

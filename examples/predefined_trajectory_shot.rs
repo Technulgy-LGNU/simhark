@@ -112,12 +112,12 @@ fn main() -> Result<()> {
                     phase = Phase::CollectBall;
                     collect_ball_command(&state, goal)
                 } else {
-                let cmd = shoot_command(&state, goal);
-                if state.goal_blue {
-                    println!("goal at t={:.2}", state.sim_time);
-                    break;
-                }
-                cmd
+                    let cmd = shoot_command(&state, goal);
+                    if state.goal_blue {
+                        println!("goal at t={:.2}", state.sim_time);
+                        break;
+                    }
+                    cmd
                 }
             }
         };
@@ -280,7 +280,9 @@ fn pose_reached(state: &WorldState, target: PoseTarget) -> bool {
     let position_ok = (dx * dx + dy * dy).sqrt() <= POSITION_TOLERANCE;
     let orientation_ok = target
         .orientation
-        .map(|orientation| angle_error(orientation, robot.orientation).abs() <= ORIENTATION_TOLERANCE)
+        .map(|orientation| {
+            angle_error(orientation, robot.orientation).abs() <= ORIENTATION_TOLERANCE
+        })
         .unwrap_or(true);
     position_ok && orientation_ok
 }
@@ -345,13 +347,7 @@ fn collect_ball_command(state: &WorldState, goal: Point) -> WorldCommand {
     let heading_error = angle_error(goal_heading, robot.orientation);
 
     if behind_distance > BALL_STAGE_TOLERANCE {
-        return drive_to_pose_local(
-            state,
-            behind_target,
-            DRIBBLE_SPEED,
-            true,
-            None,
-        );
+        return drive_to_pose_local(state, behind_target, DRIBBLE_SPEED, true, None);
     }
 
     if heading_error.abs() > SHOOT_ALIGNMENT_TOLERANCE {
@@ -439,7 +435,13 @@ fn drive_to_pose_local(
         .map(|orientation| (angle_error(orientation, robot.orientation) * 4.0).clamp(-3.0, 3.0))
         .unwrap_or(0.0);
 
-    local_velocity_command(forward, left, angular, dribbler_on, kick_speed.unwrap_or(0.0))
+    local_velocity_command(
+        forward,
+        left,
+        angular,
+        dribbler_on,
+        kick_speed.unwrap_or(0.0),
+    )
 }
 
 fn local_velocity_command(
@@ -464,7 +466,6 @@ fn local_velocity_command(
         ..Default::default()
     }
 }
-
 
 fn robot(state: &WorldState) -> &simhark::RobotState {
     &state.blue_robots[ROBOT_ID]

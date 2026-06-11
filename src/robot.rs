@@ -214,6 +214,5 @@ pub fn is_ball_touching_kicker(
     let line_distance = (dist_x * dist_x + dist_y * dist_y).sqrt();
     let zz = (robot_pos[2] - bz).abs();
 
-    line_distance <= ball_radius + tolerance
-        && zz <= kicker_height * 0.5 + ball_radius
+    line_distance <= ball_radius + tolerance && zz <= kicker_height * 0.5 + ball_radius
 }

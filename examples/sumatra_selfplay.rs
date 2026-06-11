@@ -190,8 +190,10 @@ fn ball_recovery_reason(state: &WorldState, config: &WorldConfig) -> Option<&'st
         .max(config.yellow_robots.center_from_kicker)
         + config.ball.radius
         + 0.03;
-    let reachable_x = half_length + config.field.margin_goal_line - robot_radius + max_contact_reach;
-    let reachable_y = half_width + config.field.margin_touch_line - robot_radius + max_contact_reach;
+    let reachable_x =
+        half_length + config.field.margin_goal_line - robot_radius + max_contact_reach;
+    let reachable_y =
+        half_width + config.field.margin_touch_line - robot_radius + max_contact_reach;
     if state.ball.x.abs() > reachable_x || state.ball.y.abs() > reachable_y {
         return Some("outside-robot-reach");
     }
