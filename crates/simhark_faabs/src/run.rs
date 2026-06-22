@@ -1,6 +1,7 @@
+use CrashPilot::core_dump::proto::CpState;
 use simhark::command::{MoveCommand, RobotCommand};
 use simhark::WorldCommand;
-use tf_jetsoncode::{send_flags, CpState, TeensySendMsg};
+use tf_jetsoncode::{send_flags, TeensySendMsg};
 
 const HEADING_GAIN: f64 = 6.0;
 const MAX_ANGULAR: f64 = 20.0;

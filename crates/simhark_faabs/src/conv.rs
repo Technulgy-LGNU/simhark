@@ -3,13 +3,11 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use simhark::WorldState;
 use simhark::state::{KickStatus, RobotState};
 use CrashPilot::core_dump;
-use CrashPilot::core_dump::proto::{
-    self as cp_proto, SslDetectionBall, SslDetectionFrame, SslDetectionRobot, SslWrapperPacket,
-    Team, TrackedBall, TrackedFrame, TrackedRobot, TrackerWrapperPacket, Vector2, Vector3,
+use CrashPilot::core_dump::proto::{self as cp_proto, RobotCp, SslDetectionBall, SslDetectionFrame, SslDetectionRobot, SslWrapperPacket, Team, TrackedBall, TrackedFrame, TrackedRobot, TrackerWrapperPacket, Vector2, Vector3};
+use core_dump::proto::{
+    CpBall, CpCommand, CpRobot, CpTrackedRobot, CpVector2,
 };
-use tf_jetsoncode::{
-    CpBall, CpCommand, CpRobot, CpTrackedRobot, CpVector2, TeensyRecMSG,
-};
+use tf_jetsoncode::TeensyRecMSG;
 
 pub fn world_state_to_cp_events(events: &mut ::CrashPilot::Events, state: &WorldState) {
     events.raw = world_state_to_ssl_wrapper(state);
@@ -160,6 +158,7 @@ fn cp_robot_msg(msg: core_dump::proto::CpRobot) -> CpRobot {
         robots_yellow: msg.robots_yellow.into_iter().map(cp_tracked_robot).collect(),
         robots_blue: msg.robots_blue.into_iter().map(cp_tracked_robot).collect(),
         cmd: cp_command(msg.cmd),
+        infos: Default::default(),
     }
 }
 
@@ -201,7 +200,7 @@ fn cp_command(c: core_dump::proto::CpCommand) -> CpCommand {
     }
 }
 
-pub fn robot_cp(cp: tf_jetsoncode::RobotCp) -> core_dump::proto::RobotCp {
+pub fn robot_cp(cp: RobotCp) -> RobotCp {
     core_dump::proto::RobotCp {
         robot_id: cp.robot_id,
         battery_voltage: cp.battery_voltage,
