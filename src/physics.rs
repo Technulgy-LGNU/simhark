@@ -585,11 +585,7 @@ impl PhysicsWorld {
             ball.reset_torques(false);
         }
 
-        for robot in self
-            .blue_robots
-            .iter()
-            .chain(self.yellow_robots.iter())
-        {
+        for robot in self.blue_robots.iter().chain(self.yellow_robots.iter()) {
             let body = &mut self.rigid_body_set[robot.chassis_body];
             body.reset_forces(false);
             body.reset_torques(false);
@@ -758,7 +754,13 @@ impl PhysicsWorld {
         self.rigid_body_set[handle].set_linvel(Vector::new(vx, vy, vz), true);
     }
 
-    pub fn set_body_angular_velocity(&mut self, handle: RigidBodyHandle, wx: f32, wy: f32, wz: f32) {
+    pub fn set_body_angular_velocity(
+        &mut self,
+        handle: RigidBodyHandle,
+        wx: f32,
+        wy: f32,
+        wz: f32,
+    ) {
         self.rigid_body_set[handle].set_angvel(Vector::new(wx, wy, wz), true);
     }
 
@@ -770,7 +772,6 @@ impl PhysicsWorld {
         self.collider_set[robot.dummy_collider].collision_groups() == dummy_groups()
             && self.collider_set[robot.kicker_collider].collision_groups() == kicker_groups()
     }
-
 }
 
 fn to_rapier_vec(v: NVec3<f32>) -> Vector {
@@ -807,7 +808,8 @@ fn clamp_robot_position_if_escaped(body: &mut RigidBody, bound_x: f32, bound_y: 
     const PARKED_MARGIN: f32 = 10.0;
 
     let translation = body.translation();
-    if translation.x.abs() > bound_x + PARKED_MARGIN || translation.y.abs() > bound_y + PARKED_MARGIN
+    if translation.x.abs() > bound_x + PARKED_MARGIN
+        || translation.y.abs() > bound_y + PARKED_MARGIN
     {
         return;
     }

@@ -858,7 +858,9 @@ fn test_sumatra_single_team_scores_five_goals() {
             })
             .collect();
 
-        let states = server.step_with_local_commands(&mut engine, &[commands]).unwrap();
+        let states = server
+            .step_with_local_commands(&mut engine, &[commands])
+            .unwrap();
         let state = &states[0];
 
         if cooldown > 0 {

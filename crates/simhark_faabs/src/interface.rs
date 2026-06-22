@@ -1,20 +1,16 @@
-use futures_util::{SinkExt, StreamExt};
-use std::sync::Arc;
-use CrashPilot::communication::WebsocketOut;
 use CrashPilot::Config;
-use tokio::sync::Mutex;
+use CrashPilot::communication::WebsocketOut;
 use CrashPilot::core_dump::proto::InterfaceWrapperCp;
+use futures_util::{SinkExt, StreamExt};
 use prost::Message;
+use std::sync::Arc;
 use tokio::net::TcpListener;
+use tokio::sync::Mutex;
 use tokio_tungstenite::tungstenite::Bytes;
 
 pub type EventShare = Arc<Mutex<Option<InterfaceWrapperCp>>>;
 
-pub async fn spawn_websocket(
-    cfg: &Config,
-    tx: EventShare,
-    ws_out: WebsocketOut,
-) {
+pub async fn spawn_websocket(cfg: &Config, tx: EventShare, ws_out: WebsocketOut) {
     let addr = format!(
         "{}:{}",
         cfg.server.websocket_host, cfg.server.websocket_port

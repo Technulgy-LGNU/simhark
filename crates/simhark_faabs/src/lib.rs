@@ -7,13 +7,13 @@ use crate::conv::world_state_to_cp_events;
 #[cfg(feature = "interface")]
 use crate::interface::EventShare;
 use crate::run::run_sim_action;
+use ::CrashPilot::CrashPilot;
+use ::CrashPilot::config::{LoggingConfig, RobotConfig, ServerConfig, SslConfig};
 use simhark::{WorldCommand, WorldState};
 use std::collections::HashMap;
 use std::mem;
 use std::net::Ipv4Addr;
 use tf_jetsoncode::Robot;
-use ::CrashPilot::config::{LoggingConfig, RobotConfig, ServerConfig, SslConfig};
-use ::CrashPilot::CrashPilot;
 
 pub struct Faabs {
     pub robots: Vec<Robot<()>>,
@@ -69,8 +69,14 @@ impl Faabs {
         }
     }
 
-    pub fn step(&mut self, state: &WorldState, command: &mut WorldCommand) {
+    pub fn step(
+        &mut self,
+        state: &WorldState,
+        command: &mut WorldCommand,
+        referee: Option<::CrashPilot::core_dump::proto::Referee>,
+    ) {
         world_state_to_cp_events(&mut self.events, state);
+        self.events.gc = referee;
 
         #[cfg(feature = "interface")]
         {
@@ -97,11 +103,9 @@ impl Faabs {
                 );
             };
 
-
             let events = conv::robot_events(id, data, state);
 
             let (teensy, robot_cp) = robot.step_with_data(events);
-
 
             run_sim_action(id, teensy, command);
 
