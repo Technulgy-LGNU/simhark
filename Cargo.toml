@@ -15,6 +15,7 @@ resolver = "2"
 
 [features]
 default = []
+sumatra = []
 viewer = ["dep:tiny_http", "dep:tungstenite"]
 motion-audit = []
 
@@ -67,7 +68,17 @@ codegen-units = 1
 [[example]]
 name = "sumatra-selfplay"
 path = "examples/sumatra_selfplay.rs"
-required-features = ["viewer"]
+required-features = ["sumatra", "viewer"]
+
+[[example]]
+name = "sumatra-selfplay-two-worlds"
+path = "examples/sumatra_selfplay_two_worlds.rs"
+required-features = ["sumatra"]
+
+[[example]]
+name = "sumatra-blue-scores"
+path = "examples/sumatra_blue_scores.rs"
+required-features = ["sumatra"]
 
 [[example]]
 name = "testing-viewer"
