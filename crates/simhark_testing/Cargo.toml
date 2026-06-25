@@ -1,0 +1,14 @@
+[package]
+name = "simhark_testing"
+version = "0.1.0"
+edition = "2024"
+description = "Batch testing helpers for simhark simulator worlds"
+license = "GPL-3.0"
+
+[features]
+default = []
+viewer = ["simhark/viewer"]
+
+[dependencies]
+simhark = { path = "../.." }
+serde = { version = "1", features = ["derive"] }

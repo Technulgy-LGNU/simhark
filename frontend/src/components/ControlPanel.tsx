@@ -2,10 +2,11 @@ import type { ControlSnapshot } from "../hooks/useViewerSocket";
 
 interface ControlPanelProps {
   control: ControlSnapshot;
-  onSend: (action: "start" | "stop" | "restart") => void;
+  onSend: (action: "start" | "stop" | "restart" | "pause") => void;
+  onSpeed: (speed: number) => void;
 }
 
-export default function ControlPanel({ control, onSend }: ControlPanelProps) {
+export default function ControlPanel({ control, onSend, onSpeed }: ControlPanelProps) {
   if (!control.web_enabled) {
     return null;
   }
@@ -43,7 +44,7 @@ export default function ControlPanel({ control, onSend }: ControlPanelProps) {
         </span>
       </div>
 
-      <div className="grid grid-cols-3 gap-2">
+      <div className="grid grid-cols-2 gap-2">
         <button
           onClick={() => onSend("start")}
           disabled={control.running}
@@ -55,8 +56,18 @@ export default function ControlPanel({ control, onSend }: ControlPanelProps) {
           Start
         </button>
         <button
-          onClick={() => onSend("stop")}
+          onClick={() => onSend("pause")}
           disabled={!control.running}
+          className="flex items-center justify-center gap-1.5 py-2 rounded-lg text-xs font-semibold transition bg-slate-700/60 hover:bg-slate-700/80 text-white disabled:opacity-40 disabled:cursor-not-allowed"
+        >
+          <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor">
+            <rect x="6" y="5" width="4" height="14" rx="1" />
+            <rect x="14" y="5" width="4" height="14" rx="1" />
+          </svg>
+          Pause
+        </button>
+        <button
+          onClick={() => onSend("stop")}
           className="flex items-center justify-center gap-1.5 py-2 rounded-lg text-xs font-semibold transition bg-red-600/80 hover:bg-red-600 text-white disabled:opacity-40 disabled:cursor-not-allowed"
         >
           <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor">
@@ -83,6 +94,31 @@ export default function ControlPanel({ control, onSend }: ControlPanelProps) {
           Restart
         </button>
       </div>
+
+      <div className="flex items-center gap-2">
+        <span className="text-[10px] uppercase tracking-[0.15em] text-slate-500">
+          Speed
+        </span>
+        <select
+          value={nearestSpeed(control.speed)}
+          onChange={(event) => onSpeed(Number(event.target.value))}
+          className="bg-slate-900/60 border border-slate-700/40 rounded-md text-xs text-slate-100 font-mono px-2 py-1.5 flex-1 focus:outline-none focus:border-cyan-500/60"
+        >
+          <option value={0.1}>0.1x</option>
+          <option value={0.25}>0.25x</option>
+          <option value={0.5}>0.5x</option>
+          <option value={1}>1x</option>
+          <option value={2}>2x</option>
+          <option value={4}>4x</option>
+        </select>
+      </div>
     </div>
+  );
+}
+
+function nearestSpeed(speed: number): number {
+  const speeds = [0.1, 0.25, 0.5, 1, 2, 4];
+  return speeds.reduce((best, candidate) =>
+    Math.abs(candidate - speed) < Math.abs(best - speed) ? candidate : best
   );
 }

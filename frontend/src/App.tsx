@@ -4,6 +4,7 @@ import StatsPanel from "./components/StatsPanel";
 import GameStatePanel from "./components/GameStatePanel";
 import WorldSelector from "./components/WorldSelector";
 import ControlPanel from "./components/ControlPanel";
+import TestPanel from "./components/TestPanel";
 
 declare global {
   interface Window {
@@ -22,8 +23,8 @@ function resolveWsPort(): number {
 
 export default function App() {
   const wsPort = resolveWsPort();
-  const { frame, connected, selectWorld, sendControl } = useViewerSocket(wsPort);
-  const control = frame?.control ?? { web_enabled: false, running: true };
+  const { frame, connected, selectWorld, sendControl, setSpeed } = useViewerSocket(wsPort);
+  const control = frame?.control ?? { web_enabled: false, running: true, speed: 1 };
 
   return (
     <div className="h-full flex flex-col bg-dot-pattern text-slate-100">
@@ -78,10 +79,15 @@ export default function App() {
         </div>
 
         <div className="w-80 shrink-0 glass-panel panel-accent flex flex-col overflow-hidden">
-          <ControlPanel control={control} onSend={sendControl} />
+          <ControlPanel control={control} onSend={sendControl} onSpeed={setSpeed} />
           <WorldSelector
             worldCount={frame?.world_count ?? 0}
             selected={frame?.selected_world ?? 0}
+            onSelect={selectWorld}
+          />
+          <TestPanel
+            suite={frame?.test_suite ?? null}
+            selectedWorld={frame?.selected_world ?? 0}
             onSelect={selectWorld}
           />
           <GameStatePanel

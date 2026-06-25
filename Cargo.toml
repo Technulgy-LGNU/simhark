@@ -6,7 +6,11 @@ description = "A high-performance parallel RoboCup SSL simulator inspired by grS
 license = "GPL-3.0"
 
 [workspace]
-members = ["crates/simhark-sumatra", "crates/simhark_faabs"]
+members = [
+    "crates/simhark-sumatra",
+    "crates/simhark_faabs",
+    "crates/simhark_testing",
+]
 resolver = "2"
 
 [features]
@@ -46,6 +50,7 @@ approx = "0.5"
 ctrlc = "3.5"
 referris = { git = "https://github.com/Technulgy-LGNU/referris", default-features = false }
 simhark-sumatra = { path = "crates/simhark-sumatra" }
+simhark_testing = { path = "crates/simhark_testing", features = ["viewer"] }
 
 [build-dependencies]
 prost-build = "0.13"
@@ -62,4 +67,9 @@ codegen-units = 1
 [[example]]
 name = "sumatra-selfplay"
 path = "examples/sumatra_selfplay.rs"
+required-features = ["viewer"]
+
+[[example]]
+name = "testing-viewer"
+path = "examples/testing_viewer.rs"
 required-features = ["viewer"]

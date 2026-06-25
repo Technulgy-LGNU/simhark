@@ -71,6 +71,24 @@ export interface GoalSummary {
 export interface ControlSnapshot {
   web_enabled: boolean;
   running: boolean;
+  speed: number;
+}
+
+export interface TestStatus {
+  world_id: number;
+  path: string[];
+  name: string;
+  outcome: "running" | "passed" | "failed" | "timed_out";
+  frame: number;
+  message: string | null;
+}
+
+export interface TestSuiteSnapshot {
+  passed: number;
+  failed: number;
+  timed_out: number;
+  running: number;
+  tests: TestStatus[];
 }
 
 export interface ViewerFrame {
@@ -81,6 +99,7 @@ export interface ViewerFrame {
   ball_radius: number;
   state: WorldState;
   game_state: GameStateInfo | null;
+  test_suite: TestSuiteSnapshot | null;
   goals: GoalSummary;
   control: ControlSnapshot;
 }
@@ -144,12 +163,19 @@ export function useViewerSocket(wsPort: number) {
     }
   }, []);
 
-  const sendControl = useCallback((action: "start" | "stop" | "restart") => {
+  const sendControl = useCallback((action: "start" | "stop" | "restart" | "pause") => {
     const socket = socketRef.current;
     if (socket && socket.readyState === WebSocket.OPEN) {
       socket.send(`control:${action}`);
     }
   }, []);
 
-  return { frame, connected, selectWorld, sendControl };
+  const setSpeed = useCallback((speed: number) => {
+    const socket = socketRef.current;
+    if (socket && socket.readyState === WebSocket.OPEN) {
+      socket.send(`speed:${speed}`);
+    }
+  }, []);
+
+  return { frame, connected, selectWorld, sendControl, setSpeed };
 }
