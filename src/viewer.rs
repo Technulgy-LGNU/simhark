@@ -10,6 +10,7 @@ use std::time::Duration;
 
 use parking_lot::Mutex;
 use serde::Serialize;
+use serde_json::Value;
 use tiny_http::{Header, Method, Response, Server, StatusCode};
 use tungstenite::{Message, accept};
 
@@ -98,12 +99,15 @@ struct WebControlState {
     enabled: AtomicBool,
     running: AtomicBool,
     restart_requested: AtomicBool,
+    stop_requested: AtomicBool,
+    speed_percent: AtomicUsize,
 }
 
 #[derive(Serialize)]
 struct ControlSnapshot {
     web_enabled: bool,
     running: bool,
+    speed: f64,
 }
 
 #[derive(Default)]
@@ -158,6 +162,7 @@ pub struct ViewerServer {
     selected_world: Arc<AtomicUsize>,
     latest_frame: Arc<Mutex<Option<String>>>,
     game_state: Arc<Mutex<GameStateTracker>>,
+    test_suite: Arc<Mutex<Option<Value>>>,
     goal_tracker: Arc<Mutex<GoalTracker>>,
     control: Arc<WebControlState>,
     _http_thread: thread::JoinHandle<()>,
@@ -173,6 +178,7 @@ struct ViewerFrame<'a> {
     ball_radius: f64,
     state: &'a WorldState,
     game_state: Option<PublishedGameState<'a>>,
+    test_suite: Option<Value>,
     goals: GoalSummary,
     control: ControlSnapshot,
 }
@@ -192,11 +198,13 @@ impl ViewerServer {
         let selected_world = Arc::new(AtomicUsize::new(0));
         let latest_frame = Arc::new(Mutex::new(None));
         let game_state = Arc::new(Mutex::new(GameStateTracker::default()));
+        let test_suite = Arc::new(Mutex::new(None));
         let goal_tracker = Arc::new(Mutex::new(GoalTracker::default()));
         let control = Arc::new(WebControlState::default());
         // When web control is disabled the simulator is considered always
         // running, so callers that don't opt in see the legacy behaviour.
         control.running.store(true, Ordering::Relaxed);
+        control.speed_percent.store(100, Ordering::Relaxed);
 
         let http_thread = {
             let ws_port = config.websocket_port();
@@ -220,6 +228,7 @@ impl ViewerServer {
             selected_world,
             latest_frame,
             game_state,
+            test_suite,
             goal_tracker,
             control,
             _http_thread: http_thread,
@@ -236,6 +245,8 @@ impl ViewerServer {
         self.control
             .restart_requested
             .store(false, Ordering::Relaxed);
+        self.control.stop_requested.store(false, Ordering::Relaxed);
+        self.control.speed_percent.store(100, Ordering::Relaxed);
     }
 
     /// True when the simulator should keep stepping. Always true when web
@@ -252,6 +263,23 @@ impl ViewerServer {
             .swap(false, Ordering::Relaxed)
     }
 
+    pub fn take_stop_request(&self) -> bool {
+        self.control.stop_requested.swap(false, Ordering::Relaxed)
+    }
+
+    pub fn speed(&self) -> f64 {
+        self.control.speed_percent.load(Ordering::Relaxed) as f64 / 100.0
+    }
+
+    pub fn scaled_sleep(&self, base: Duration) -> Duration {
+        let speed = self.speed();
+        if speed <= 0.0 {
+            base
+        } else {
+            Duration::from_secs_f64(base.as_secs_f64() / speed)
+        }
+    }
+
     pub fn selected_world(&self) -> usize {
         self.selected_world
             .load(Ordering::Relaxed)
@@ -264,8 +292,13 @@ impl ViewerServer {
         self.game_state.lock().update(info);
     }
 
+    pub fn set_test_suite<T: Serialize>(&self, suite: T) {
+        *self.test_suite.lock() = serde_json::to_value(suite).ok();
+    }
+
     pub fn publish(&self, state: &WorldState) {
         let game_state_guard = self.game_state.lock();
+        let test_suite = self.test_suite.lock().clone();
         let mut goal_guard = self.goal_tracker.lock();
         goal_guard.observe(state);
         let frame = ViewerFrame {
@@ -276,6 +309,7 @@ impl ViewerServer {
             ball_radius: self.ball_radius,
             state,
             game_state: game_state_guard.snapshot(),
+            test_suite,
             goals: GoalSummary {
                 blue: goal_guard.blue,
                 yellow: goal_guard.yellow,
@@ -285,6 +319,7 @@ impl ViewerServer {
             control: ControlSnapshot {
                 web_enabled: self.control.enabled.load(Ordering::Relaxed),
                 running: self.control.running.load(Ordering::Relaxed),
+                speed: self.speed(),
             },
         };
 
@@ -389,12 +424,29 @@ fn handle_client_message(message: &str, selected_world: &AtomicUsize, control: &
         }
         match action.trim() {
             "start" => control.running.store(true, Ordering::Relaxed),
-            "stop" => control.running.store(false, Ordering::Relaxed),
+            "pause" => control.running.store(false, Ordering::Relaxed),
+            "stop" => {
+                control.stop_requested.store(true, Ordering::Relaxed);
+                control.running.store(false, Ordering::Relaxed);
+            }
             "restart" => {
                 control.restart_requested.store(true, Ordering::Relaxed);
                 control.running.store(true, Ordering::Relaxed);
             }
             _ => {}
+        }
+        return;
+    }
+
+    if let Some(value) = message.strip_prefix("speed:") {
+        if !control.enabled.load(Ordering::Relaxed) {
+            return;
+        }
+        if let Ok(speed) = value.trim().parse::<f64>() {
+            let speed_percent = (speed.clamp(0.05, 4.0) * 100.0).round() as usize;
+            control
+                .speed_percent
+                .store(speed_percent.max(1), Ordering::Relaxed);
         }
     }
 }
