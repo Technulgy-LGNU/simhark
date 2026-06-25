@@ -1,12 +1,14 @@
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use simhark::WorldState;
-use simhark::state::{KickStatus, RobotState};
+use core_dump::proto::{CpBall, CpCommand, CpRobot, CpTrackedRobot, CpVector2};
 use crashpilot::core_dump;
-use crashpilot::core_dump::proto::{self as cp_proto, RobotCp, SslDetectionBall, SslDetectionFrame, SslDetectionRobot, SslWrapperPacket, Team, TrackedBall, TrackedFrame, TrackedRobot, TrackerWrapperPacket, Vector2, Vector3};
-use core_dump::proto::{
-    CpBall, CpCommand, CpRobot, CpTrackedRobot, CpVector2,
+use crashpilot::core_dump::proto::{
+    self as cp_proto, RobotCp, SslDetectionBall, SslDetectionFrame, SslDetectionRobot,
+    SslGeometryData, SslGeometryFieldSize, SslWrapperPacket, Team, TrackedBall, TrackedFrame,
+    TrackedRobot, TrackerWrapperPacket, Vector2, Vector3,
 };
+use simhark::state::{KickStatus, RobotState};
+use simhark::{WorldConfig, WorldState};
 use tf_jetsoncode::TeensyRecMSG;
 
 pub fn world_state_to_cp_events(events: &mut ::crashpilot::Events, state: &WorldState) {
@@ -38,9 +40,43 @@ pub fn world_state_to_ssl_wrapper(state: &WorldState) -> Option<SslWrapperPacket
 
     Some(SslWrapperPacket {
         detection: Some(detection),
-        geometry: None,
+        geometry: Some(geometry_from_config(&WorldConfig::division_b())),
         source: None,
     })
+}
+
+fn geometry_from_config(config: &WorldConfig) -> SslGeometryData {
+    let field = &config.field;
+    let ball = &config.ball;
+    let robot = &config.yellow_robots;
+
+    SslGeometryData {
+        field: SslGeometryFieldSize {
+            field_length: meters_to_mm(field.field_length),
+            field_width: meters_to_mm(field.field_width),
+            goal_width: meters_to_mm(field.goal_width),
+            goal_depth: meters_to_mm(field.goal_depth),
+            boundary_width: meters_to_mm(field.margin_touch_line),
+            boundary_width_goal_line: Some(meters_to_mm(field.margin_goal_line)),
+            field_lines: Vec::new(),
+            field_arcs: Vec::new(),
+            penalty_area_depth: Some(meters_to_mm(field.penalty_depth)),
+            penalty_area_width: Some(meters_to_mm(field.penalty_width)),
+            center_circle_radius: Some(meters_to_mm(field.field_center_radius)),
+            line_thickness: Some(meters_to_mm(field.field_line_width)),
+            goal_center_to_penalty_mark: Some(meters_to_mm(field.penalty_point)),
+            goal_height: Some(meters_to_mm(field.goal_height)),
+            ball_radius: Some((ball.radius * 1000.0) as f32),
+            max_robot_radius: Some((robot.radius * 1000.0) as f32),
+            goal_substitution_area_width: Some(meters_to_mm(field.goal_substitution_area_width)),
+        },
+        calib: Vec::new(),
+        models: None,
+    }
+}
+
+fn meters_to_mm(value: f64) -> i32 {
+    (value * 1000.0).round() as i32
 }
 
 pub fn world_state_to_tracker_wrapper(state: &WorldState) -> Option<TrackerWrapperPacket> {
@@ -94,28 +130,35 @@ fn detection_robots(robots: &[RobotState]) -> Vec<SslDetectionRobot> {
 }
 
 fn tracked_robots(out: &mut Vec<TrackedRobot>, robots: &[RobotState], team: Team) {
-    out.extend(robots.iter().filter(|robot| robot.is_on).map(|robot| {
-        TrackedRobot {
-            robot_id: cp_proto::RobotId {
-                id: Some(robot.id as u32),
-                team: Some(team as i32),
-            },
-            pos: Vector2 {
-                x: robot.x as f32,
-                y: robot.y as f32,
-            },
-            orientation: robot.orientation as f32,
-            vel: Some(Vector2 {
-                x: robot.vx as f32,
-                y: robot.vy as f32,
+    out.extend(
+        robots
+            .iter()
+            .filter(|robot| robot.is_on)
+            .map(|robot| TrackedRobot {
+                robot_id: cp_proto::RobotId {
+                    id: Some(robot.id as u32),
+                    team: Some(team as i32),
+                },
+                pos: Vector2 {
+                    x: robot.x as f32,
+                    y: robot.y as f32,
+                },
+                orientation: robot.orientation as f32,
+                vel: Some(Vector2 {
+                    x: robot.vx as f32,
+                    y: robot.vy as f32,
+                }),
+                vel_angular: Some(robot.v_angular as f32),
+                visibility: Some(1.0),
             }),
-            vel_angular: Some(robot.v_angular as f32),
-            visibility: Some(1.0),
-        }
-    }));
+    );
 }
 
-pub fn robot_events(robot: u32, cp_data: CrashPilot::RobotData, state: &WorldState) -> tf_jetsoncode::Events {
+pub fn robot_events(
+    robot: u32,
+    cp_data: crashpilot::RobotData,
+    state: &WorldState,
+) -> tf_jetsoncode::Events {
     let Some(robot) = state.yellow_robots.iter().find(|r| r.id == robot as usize) else {
         panic!("Robot with id {} not found in world state", robot);
     };
@@ -144,8 +187,7 @@ pub fn robot_events(robot: u32, cp_data: CrashPilot::RobotData, state: &WorldSta
             flags,
             batt_level: 0,
             current: 0,
-        })
-
+        }),
     }
 }
 
@@ -155,7 +197,11 @@ fn cp_robot_msg(msg: core_dump::proto::CpRobot) -> CpRobot {
         timestamp: msg.timestamp,
         packet_id: msg.packet_id,
         ball: cp_ball(msg.ball),
-        robots_yellow: msg.robots_yellow.into_iter().map(cp_tracked_robot).collect(),
+        robots_yellow: msg
+            .robots_yellow
+            .into_iter()
+            .map(cp_tracked_robot)
+            .collect(),
         robots_blue: msg.robots_blue.into_iter().map(cp_tracked_robot).collect(),
         cmd: cp_command(msg.cmd),
         infos: Default::default(),
@@ -210,6 +256,7 @@ pub fn robot_cp(cp: RobotCp) -> RobotCp {
         has_error: cp.has_error,
         acting: cp.acting,
         last_rec_packet: cp.last_rec_packet,
+        timestamp: 0.0,
     }
 }
 
