@@ -23,8 +23,10 @@ function resolveWsPort(): number {
 
 export default function App() {
   const wsPort = resolveWsPort();
-  const { frame, connected, selectWorld, sendControl, setSpeed } = useViewerSocket(wsPort);
+  const { frame, connected, selectWorld, selectWorlds, sendControl, setSpeed } =
+    useViewerSocket(wsPort);
   const control = frame?.control ?? { web_enabled: false, running: true, speed: 1 };
+  const selectedWorlds = frame?.selected_worlds ?? [frame?.selected_world ?? 0];
 
   return (
     <div className="h-full flex flex-col bg-dot-pattern text-slate-100">
@@ -78,12 +80,13 @@ export default function App() {
           </div>
         </div>
 
-        <div className="w-80 shrink-0 glass-panel panel-accent flex flex-col overflow-hidden">
+        <div className="w-88 shrink-0 glass-panel panel-accent flex flex-col overflow-y-auto overflow-x-hidden">
           <ControlPanel control={control} onSend={sendControl} onSpeed={setSpeed} />
           <WorldSelector
             worldCount={frame?.world_count ?? 0}
-            selected={frame?.selected_world ?? 0}
-            onSelect={selectWorld}
+            selected={selectedWorlds}
+            suite={frame?.test_suite ?? null}
+            onSelect={selectWorlds}
           />
           <TestPanel
             suite={frame?.test_suite ?? null}

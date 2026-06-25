@@ -94,10 +94,12 @@ export interface TestSuiteSnapshot {
 export interface ViewerFrame {
   world_count: number;
   selected_world: number;
+  selected_worlds?: number[];
   field: FieldConfig;
   robot_radius: number;
   ball_radius: number;
   state: WorldState;
+  states?: WorldState[];
   game_state: GameStateInfo | null;
   test_suite: TestSuiteSnapshot | null;
   goals: GoalSummary;
@@ -163,6 +165,17 @@ export function useViewerSocket(wsPort: number) {
     }
   }, []);
 
+  const selectWorlds = useCallback((indexes: number[] | "all") => {
+    const socket = socketRef.current;
+    if (socket && socket.readyState === WebSocket.OPEN) {
+      if (indexes === "all") {
+        socket.send("worlds:all");
+      } else {
+        socket.send(`worlds:${indexes.join(",")}`);
+      }
+    }
+  }, []);
+
   const sendControl = useCallback((action: "start" | "stop" | "restart" | "pause") => {
     const socket = socketRef.current;
     if (socket && socket.readyState === WebSocket.OPEN) {
@@ -177,5 +190,5 @@ export function useViewerSocket(wsPort: number) {
     }
   }, []);
 
-  return { frame, connected, selectWorld, sendControl, setSpeed };
+  return { frame, connected, selectWorld, selectWorlds, sendControl, setSpeed };
 }

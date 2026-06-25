@@ -9,11 +9,26 @@ const FIELD_GREEN_LIGHT = "#1a5c34";
 const FIELD_GREEN_DARK = "#0d3320";
 const LINE_COLOR = "#ffffff";
 const LINE_GLOW_COLOR = "rgba(255, 255, 255, 0.15)";
-const BALL_COLOR = "#ff8c00";
-const BALL_GLOW = "rgba(255, 140, 0, 0.4)";
 const BLUE_COLOR = "#3b82f6";
 const YELLOW_COLOR = "#f59e0b";
 const PADDING = 36;
+
+const WORLD_COLORS = [
+  { base: "#38bdf8", light: "#bae6fd", dark: "#0369a1" },
+  { base: "#fb7185", light: "#fecdd3", dark: "#be123c" },
+  { base: "#a78bfa", light: "#ddd6fe", dark: "#6d28d9" },
+  { base: "#34d399", light: "#bbf7d0", dark: "#047857" },
+  { base: "#fbbf24", light: "#fef3c7", dark: "#b45309" },
+  { base: "#f472b6", light: "#fbcfe8", dark: "#be185d" },
+  { base: "#2dd4bf", light: "#ccfbf1", dark: "#0f766e" },
+  { base: "#c084fc", light: "#f3e8ff", dark: "#7e22ce" },
+  { base: "#f97316", light: "#fed7aa", dark: "#c2410c" },
+  { base: "#22c55e", light: "#dcfce7", dark: "#15803d" },
+  { base: "#60a5fa", light: "#dbeafe", dark: "#1d4ed8" },
+  { base: "#e879f9", light: "#fae8ff", dark: "#a21caf" },
+];
+
+type WorldTint = (typeof WORLD_COLORS)[number];
 
 export default function FieldCanvas({ frame }: FieldCanvasProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -80,22 +95,26 @@ export default function FieldCanvas({ frame }: FieldCanvasProps) {
 
     drawFieldLines(ctx, toCanvas, scale, field);
 
-    for (const robot of snapshot.state.blue_robots) {
-      if (!robot.is_on) continue;
-      drawRobot(ctx, toCanvas, scale, robotRadius, robot, BLUE_COLOR);
-    }
-    for (const robot of snapshot.state.yellow_robots) {
-      if (!robot.is_on) continue;
-      drawRobot(ctx, toCanvas, scale, robotRadius, robot, YELLOW_COLOR);
-    }
+    const visibleStates = snapshot.states?.length ? snapshot.states : [snapshot.state];
+    const worldOpacity = visibleStates.length > 1 ? 0.55 : 1;
 
-    drawBall(
-      ctx,
-      toCanvas,
-      scale,
-      ballRadius,
-      snapshot.state.ball
-    );
+    for (const state of visibleStates) {
+      const tint = worldTint(state.world_id);
+      ctx.save();
+      ctx.globalAlpha = worldOpacity;
+
+      for (const robot of state.blue_robots) {
+        if (!robot.is_on) continue;
+        drawRobot(ctx, toCanvas, scale, robotRadius, robot, tint, BLUE_COLOR);
+      }
+      for (const robot of state.yellow_robots) {
+        if (!robot.is_on) continue;
+        drawRobot(ctx, toCanvas, scale, robotRadius, robot, tint, YELLOW_COLOR);
+      }
+
+      drawBall(ctx, toCanvas, scale, ballRadius, state.ball, tint);
+      ctx.restore();
+    }
 
     ctx.fillStyle = "rgba(71, 85, 105, 0.7)";
     ctx.font = '10px "JetBrains Mono", monospace';
@@ -244,16 +263,14 @@ function drawRobot(
   scale: number,
   robotRadius: number,
   robot: RobotState,
-  color: string
+  tint: WorldTint,
+  teamColor: string
 ) {
   const [rx, ry] = toCanvas(robot.x, robot.y);
   const r = Math.max(robotRadius * scale, 8);
 
   const glowGrad = ctx.createRadialGradient(rx, ry, r, rx, ry, r * 2.5);
-  glowGrad.addColorStop(
-    0,
-    color === BLUE_COLOR ? "rgba(59,130,246,0.18)" : "rgba(245,158,11,0.18)"
-  );
+  glowGrad.addColorStop(0, hexToRgba(tint.base, 0.24));
   glowGrad.addColorStop(1, "rgba(0,0,0,0)");
   ctx.fillStyle = glowGrad;
   ctx.beginPath();
@@ -268,19 +285,27 @@ function drawRobot(
     ry,
     r
   );
-  if (color === BLUE_COLOR) {
-    bodyGrad.addColorStop(0, "#60a5fa");
-    bodyGrad.addColorStop(1, "#2563eb");
-  } else {
-    bodyGrad.addColorStop(0, "#fbbf24");
-    bodyGrad.addColorStop(1, "#d97706");
-  }
+  bodyGrad.addColorStop(0, tint.light);
+  bodyGrad.addColorStop(0.55, tint.base);
+  bodyGrad.addColorStop(1, tint.dark);
   ctx.beginPath();
   ctx.arc(rx, ry, r, 0, Math.PI * 2);
   ctx.fillStyle = bodyGrad;
   ctx.fill();
-  ctx.strokeStyle = "rgba(255,255,255,0.6)";
-  ctx.lineWidth = 1.5;
+
+  ctx.strokeStyle = "rgba(2, 6, 23, 0.82)";
+  ctx.lineWidth = 3.2;
+  ctx.stroke();
+  ctx.strokeStyle = teamColor;
+  ctx.lineWidth = 2;
+  ctx.stroke();
+
+  const headingAngle = -robot.orientation;
+  ctx.beginPath();
+  ctx.arc(rx, ry, r * 0.62, headingAngle - 0.72, headingAngle + 0.72);
+  ctx.strokeStyle = "rgba(255,255,255,0.8)";
+  ctx.lineWidth = 2.2;
+  ctx.lineCap = "round";
   ctx.stroke();
 
   const dirLen = r + 8;
@@ -289,13 +314,17 @@ function drawRobot(
   ctx.beginPath();
   ctx.moveTo(rx, ry);
   ctx.lineTo(rx + dx, ry + dy);
-  ctx.strokeStyle = color === BLUE_COLOR ? "#93c5fd" : "#fcd34d";
-  ctx.lineWidth = 2.5;
+  ctx.strokeStyle = teamColor;
+  ctx.lineWidth = 3;
+  ctx.lineCap = "round";
   ctx.stroke();
   ctx.beginPath();
-  ctx.arc(rx + dx, ry + dy, 2.5, 0, Math.PI * 2);
+  ctx.arc(rx + dx, ry + dy, 3, 0, Math.PI * 2);
   ctx.fillStyle = "#ffffff";
   ctx.fill();
+  ctx.strokeStyle = teamColor;
+  ctx.lineWidth = 1.5;
+  ctx.stroke();
 
   const fontSize = Math.max(r * 0.85, 9);
   ctx.font = `bold ${fontSize}px "Inter", system-ui`;
@@ -314,14 +343,15 @@ function drawBall(
   toCanvas: (x: number, y: number) => [number, number],
   scale: number,
   ballRadius: number,
-  ball: { x: number; y: number; z: number }
+  ball: { x: number; y: number; z: number },
+  tint: WorldTint
 ) {
   const [bx, by] = toCanvas(ball.x, ball.y);
   const r = Math.max(ballRadius * scale * 1.8, 5);
 
   const glowGrad = ctx.createRadialGradient(bx, by, r * 0.5, bx, by, r * 4);
-  glowGrad.addColorStop(0, BALL_GLOW);
-  glowGrad.addColorStop(1, "rgba(255, 140, 0, 0)");
+  glowGrad.addColorStop(0, hexToRgba(tint.base, 0.42));
+  glowGrad.addColorStop(1, hexToRgba(tint.base, 0));
   ctx.fillStyle = glowGrad;
   ctx.beginPath();
   ctx.arc(bx, by, r * 4, 0, Math.PI * 2);
@@ -335,15 +365,15 @@ function drawBall(
     by,
     r
   );
-  ballGrad.addColorStop(0, "#ffb347");
-  ballGrad.addColorStop(0.7, BALL_COLOR);
-  ballGrad.addColorStop(1, "#cc6600");
+  ballGrad.addColorStop(0, tint.light);
+  ballGrad.addColorStop(0.65, tint.base);
+  ballGrad.addColorStop(1, tint.dark);
   ctx.beginPath();
   ctx.arc(bx, by, r, 0, Math.PI * 2);
   ctx.fillStyle = ballGrad;
   ctx.fill();
-  ctx.strokeStyle = "rgba(255, 255, 255, 0.5)";
-  ctx.lineWidth = 1;
+  ctx.strokeStyle = "rgba(255, 255, 255, 0.85)";
+  ctx.lineWidth = 1.4;
   ctx.stroke();
 
   if (ball.z > ballRadius * 1.5) {
@@ -353,4 +383,21 @@ function drawBall(
     ctx.textBaseline = "bottom";
     ctx.fillText(`${ball.z.toFixed(2)}m`, bx + r + 4, by - r - 2);
   }
+}
+
+function worldTint(worldId: number): WorldTint {
+  return WORLD_COLORS[positiveModulo(worldId, WORLD_COLORS.length)];
+}
+
+function positiveModulo(value: number, divisor: number): number {
+  return ((value % divisor) + divisor) % divisor;
+}
+
+function hexToRgba(hex: string, alpha: number): string {
+  const normalized = hex.replace("#", "");
+  const value = Number.parseInt(normalized, 16);
+  const r = (value >> 16) & 255;
+  const g = (value >> 8) & 255;
+  const b = value & 255;
+  return `rgba(${r}, ${g}, ${b}, ${alpha})`;
 }

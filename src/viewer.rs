@@ -160,6 +160,7 @@ pub struct ViewerServer {
     robot_radius: f64,
     ball_radius: f64,
     selected_world: Arc<AtomicUsize>,
+    selected_worlds: Arc<Mutex<Vec<usize>>>,
     latest_frame: Arc<Mutex<Option<String>>>,
     game_state: Arc<Mutex<GameStateTracker>>,
     test_suite: Arc<Mutex<Option<Value>>>,
@@ -173,10 +174,12 @@ pub struct ViewerServer {
 struct ViewerFrame<'a> {
     world_count: usize,
     selected_world: usize,
+    selected_worlds: Vec<usize>,
     field: &'a FieldConfig,
     robot_radius: f64,
     ball_radius: f64,
     state: &'a WorldState,
+    states: Vec<&'a WorldState>,
     game_state: Option<PublishedGameState<'a>>,
     test_suite: Option<Value>,
     goals: GoalSummary,
@@ -196,6 +199,7 @@ impl ViewerServer {
         let ws_listener = TcpListener::bind(ws_addr)?;
 
         let selected_world = Arc::new(AtomicUsize::new(0));
+        let selected_worlds = Arc::new(Mutex::new(vec![0]));
         let latest_frame = Arc::new(Mutex::new(None));
         let game_state = Arc::new(Mutex::new(GameStateTracker::default()));
         let test_suite = Arc::new(Mutex::new(None));
@@ -214,9 +218,16 @@ impl ViewerServer {
         let ws_thread = {
             let latest_frame = Arc::clone(&latest_frame);
             let selected_world = Arc::clone(&selected_world);
+            let selected_worlds = Arc::clone(&selected_worlds);
             let control_for_ws = Arc::clone(&control);
             thread::spawn(move || {
-                run_websocket_server(ws_listener, latest_frame, selected_world, control_for_ws)
+                run_websocket_server(
+                    ws_listener,
+                    latest_frame,
+                    selected_world,
+                    selected_worlds,
+                    control_for_ws,
+                )
             })
         };
 
@@ -226,6 +237,7 @@ impl ViewerServer {
             robot_radius: world_config.blue_robots.radius,
             ball_radius: world_config.ball.radius,
             selected_world,
+            selected_worlds,
             latest_frame,
             game_state,
             test_suite,
@@ -286,6 +298,16 @@ impl ViewerServer {
             .min(self.world_count.saturating_sub(1))
     }
 
+    pub fn selected_worlds(&self) -> Vec<usize> {
+        selected_worlds_snapshot(&self.selected_worlds, self.world_count)
+    }
+
+    pub fn select_world(&self, index: usize) {
+        let index = index.min(self.world_count.saturating_sub(1));
+        self.selected_world.store(index, Ordering::Relaxed);
+        *self.selected_worlds.lock() = vec![index];
+    }
+
     /// Push a new referee snapshot. The viewer accumulates per-command counts
     /// so the UI can show "how many times have we entered each game state".
     pub fn set_game_state(&self, info: GameStateInfo) {
@@ -297,17 +319,35 @@ impl ViewerServer {
     }
 
     pub fn publish(&self, state: &WorldState) {
+        self.publish_states(std::slice::from_ref(state));
+    }
+
+    pub fn publish_states(&self, states: &[WorldState]) {
+        let Some(state) = selected_state(states, self.selected_world()) else {
+            return;
+        };
         let game_state_guard = self.game_state.lock();
         let test_suite = self.test_suite.lock().clone();
         let mut goal_guard = self.goal_tracker.lock();
         goal_guard.observe(state);
+        let selected_worlds = selected_worlds_snapshot(&self.selected_worlds, self.world_count);
+        let selected_states = selected_worlds
+            .iter()
+            .filter_map(|world| selected_state(states, *world))
+            .collect::<Vec<_>>();
         let frame = ViewerFrame {
             world_count: self.world_count,
             selected_world: self.selected_world(),
+            selected_worlds,
             field: &self.field,
             robot_radius: self.robot_radius,
             ball_radius: self.ball_radius,
             state,
+            states: if selected_states.is_empty() {
+                vec![state]
+            } else {
+                selected_states
+            },
             game_state: game_state_guard.snapshot(),
             test_suite,
             goals: GoalSummary {
@@ -358,6 +398,7 @@ fn run_websocket_server(
     listener: TcpListener,
     latest_frame: Arc<Mutex<Option<String>>>,
     selected_world: Arc<AtomicUsize>,
+    selected_worlds: Arc<Mutex<Vec<usize>>>,
     control: Arc<WebControlState>,
 ) {
     for stream in listener.incoming() {
@@ -367,24 +408,33 @@ fn run_websocket_server(
 
         let latest_frame = Arc::clone(&latest_frame);
         let selected_world = Arc::clone(&selected_world);
+        let selected_worlds = Arc::clone(&selected_worlds);
         let control = Arc::clone(&control);
         thread::spawn(move || {
             let Ok(mut websocket) = accept(stream) else {
                 return;
             };
-            let _ = websocket.get_mut().set_nonblocking(true);
+            let _ = websocket
+                .get_mut()
+                .set_read_timeout(Some(Duration::from_millis(1)));
 
             let mut last_sent = String::new();
 
             loop {
                 match websocket.read() {
-                    Ok(Message::Text(text)) => {
-                        handle_client_message(text.as_str(), &selected_world, &control)
-                    }
+                    Ok(Message::Text(text)) => handle_client_message(
+                        text.as_str(),
+                        &selected_world,
+                        &selected_worlds,
+                        &control,
+                    ),
                     Ok(Message::Close(_)) => break,
                     Ok(_) => {}
                     Err(tungstenite::Error::Io(err))
-                        if err.kind() == std::io::ErrorKind::WouldBlock => {}
+                        if matches!(
+                            err.kind(),
+                            std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut
+                        ) => {}
                     Err(
                         tungstenite::Error::ConnectionClosed | tungstenite::Error::AlreadyClosed,
                     ) => {
@@ -408,10 +458,28 @@ fn run_websocket_server(
     }
 }
 
-fn handle_client_message(message: &str, selected_world: &AtomicUsize, control: &WebControlState) {
+fn handle_client_message(
+    message: &str,
+    selected_world: &AtomicUsize,
+    selected_worlds: &Mutex<Vec<usize>>,
+    control: &WebControlState,
+) {
     if let Some(value) = message.strip_prefix("world:") {
         if let Ok(index) = value.trim().parse::<usize>() {
             selected_world.store(index, Ordering::Relaxed);
+            *selected_worlds.lock() = vec![index];
+        }
+        return;
+    }
+
+    if let Some(value) = message.strip_prefix("worlds:") {
+        let worlds = parse_world_selection(value);
+        if value.trim().eq_ignore_ascii_case("all") {
+            selected_world.store(0, Ordering::Relaxed);
+            *selected_worlds.lock() = Vec::new();
+        } else if let Some(first) = worlds.first() {
+            selected_world.store(*first, Ordering::Relaxed);
+            *selected_worlds.lock() = worlds;
         }
         return;
     }
@@ -449,6 +517,45 @@ fn handle_client_message(message: &str, selected_world: &AtomicUsize, control: &
                 .store(speed_percent.max(1), Ordering::Relaxed);
         }
     }
+}
+
+fn parse_world_selection(value: &str) -> Vec<usize> {
+    let value = value.trim();
+    if value.eq_ignore_ascii_case("all") {
+        return Vec::new();
+    }
+
+    let mut worlds = value
+        .split(',')
+        .filter_map(|part| part.trim().parse::<usize>().ok())
+        .collect::<Vec<_>>();
+    worlds.sort_unstable();
+    worlds.dedup();
+    worlds
+}
+
+fn selected_worlds_snapshot(selected_worlds: &Mutex<Vec<usize>>, world_count: usize) -> Vec<usize> {
+    let selected = selected_worlds.lock().clone();
+    let mut worlds = if selected.is_empty() {
+        (0..world_count).collect::<Vec<_>>()
+    } else {
+        selected
+            .into_iter()
+            .filter(|world| *world < world_count)
+            .collect::<Vec<_>>()
+    };
+    if worlds.is_empty() {
+        worlds.push(0);
+    }
+    worlds
+}
+
+fn selected_state(states: &[WorldState], selected_world: usize) -> Option<&WorldState> {
+    if states.is_empty() {
+        return None;
+    }
+    let index = selected_world.min(states.len().saturating_sub(1));
+    states.get(index)
 }
 
 const FRONTEND_HTML: &str = include_str!("../frontend/dist/index.html");

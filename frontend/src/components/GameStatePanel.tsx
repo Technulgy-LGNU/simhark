@@ -46,7 +46,7 @@ export default function GameStatePanel({
   );
 
   return (
-    <div className="px-3 py-2.5 border-b border-slate-700/30 space-y-2">
+    <div className="px-3 py-2.5 border-b border-slate-700/30 space-y-2 shrink-0 overflow-hidden">
       <h2 className="text-[10px] font-semibold text-cyan-400/80 uppercase tracking-[0.15em] flex items-center gap-1.5">
         <svg
           className="w-3 h-3"
