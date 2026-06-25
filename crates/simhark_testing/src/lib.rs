@@ -1,6 +1,8 @@
 //! Batch test runner for simhark simulations.
 
 use std::borrow::Cow;
+use std::env;
+use std::fmt;
 use std::thread;
 use std::time::Duration;
 
@@ -229,12 +231,106 @@ impl<T> TestPlan<T> {
     fn into_groups(self) -> Vec<Vec<TestCase<T>>> {
         self.groups.into_iter().map(TestSuite::into_cases).collect()
     }
+
+    pub fn into_cases(self) -> Vec<TestCase<T>> {
+        self.into_groups().into_iter().flatten().collect()
+    }
 }
 
 impl<T> Default for TestPlan<T> {
     fn default() -> Self {
         Self::new()
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TestReportMode {
+    Summary,
+    All,
+    Failures,
+    FailureDetails,
+}
+
+#[derive(Debug, Clone)]
+pub struct TestCli {
+    pub report: TestReportMode,
+    pub trace_patterns: Vec<String>,
+    pub trace_failing: bool,
+    pub trace_every: u64,
+    pub help: bool,
+}
+
+impl Default for TestCli {
+    fn default() -> Self {
+        Self {
+            report: TestReportMode::Summary,
+            trace_patterns: Vec::new(),
+            trace_failing: false,
+            trace_every: 10,
+            help: false,
+        }
+    }
+}
+
+impl TestCli {
+    pub fn from_env() -> Result<Self, String> {
+        Self::parse(env::args().skip(1))
+    }
+
+    pub fn parse(args: impl IntoIterator<Item = String>) -> Result<Self, String> {
+        let mut cli = Self::default();
+        let mut args = args.into_iter();
+
+        while let Some(arg) = args.next() {
+            match arg.as_str() {
+                "-h" | "--help" => cli.help = true,
+                "--summary" => cli.report = TestReportMode::Summary,
+                "--list" | "--all" => cli.report = TestReportMode::All,
+                "--failures" => cli.report = TestReportMode::Failures,
+                "--failure-details" => cli.report = TestReportMode::FailureDetails,
+                "--trace" => {
+                    let Some(pattern) = args.next() else {
+                        return Err("--trace requires a test name pattern".to_owned());
+                    };
+                    cli.trace_patterns.push(pattern);
+                }
+                "--trace-failing" => cli.trace_failing = true,
+                "--trace-every" => {
+                    let Some(value) = args.next() else {
+                        return Err("--trace-every requires a positive integer".to_owned());
+                    };
+                    cli.trace_every = value
+                        .parse::<u64>()
+                        .map_err(|_| format!("invalid --trace-every value: {value}"))?
+                        .max(1);
+                }
+                "--trace-full" => cli.trace_every = 1,
+                _ => {
+                    return Err(format!(
+                        "unknown argument: {arg}\nrun with --help for available test diagnostics"
+                    ));
+                }
+            }
+        }
+
+        Ok(cli)
+    }
+}
+
+pub fn print_test_cli_help() {
+    println!(
+        "\
+test diagnostics:
+  --summary           print only pass/fail totals (default)
+  --list, --all       print every test with status, frame, and message
+  --failures          print only failed or timed-out tests
+  --failure-details   print failures plus final ball and robot state
+  --trace <pattern>   rerun matching test names and print world snapshots
+  --trace-failing     rerun every failed or timed-out test and print snapshots
+  --trace-every <n>   print every nth trace frame (default: 10)
+  --trace-full        print every trace frame
+  -h, --help          show this help"
+    );
 }
 
 #[derive(Debug, Clone)]
@@ -258,6 +354,7 @@ impl Default for TestRunnerConfig {
     }
 }
 
+#[derive(Clone)]
 pub struct TestRunner {
     config: TestRunnerConfig,
 }
@@ -336,6 +433,43 @@ impl TestRunner {
             batch.run_to_completion();
             report.extend(batch.into_report());
         }
+        report
+    }
+
+    pub fn run_plan_cli<T, F>(self, cli: &TestCli, mut make_plan: F) -> TestReport
+    where
+        T: SimTest,
+        F: FnMut() -> TestPlan<T>,
+    {
+        if cli.help {
+            print_test_cli_help();
+            return TestReport::default();
+        }
+
+        let report = self.clone().run_plan(make_plan());
+        print_report(&report, cli.report);
+
+        if cli.trace_failing || !cli.trace_patterns.is_empty() {
+            let failed_names = report
+                .statuses
+                .iter()
+                .filter(|status| status.is_failure())
+                .map(|status| status.name.as_str())
+                .collect::<Vec<_>>();
+            let traces = trace_plan(
+                self.config.clone(),
+                make_plan(),
+                &cli.trace_patterns,
+                if cli.trace_failing {
+                    Some(failed_names.as_slice())
+                } else {
+                    None
+                },
+                cli.trace_every,
+            );
+            print_traces(&traces);
+        }
+
         report
     }
 
@@ -646,7 +780,21 @@ where
             })
             .collect::<Vec<_>>();
 
-        self.states = self.engine.step_with_commands(&commands);
+        let next_states = self.engine.step_with_commands(&commands);
+        if self.config.stop_finished_worlds {
+            for ((state, next_state), status) in self
+                .states
+                .iter_mut()
+                .zip(next_states.into_iter())
+                .zip(self.statuses.iter())
+            {
+                if status.outcome == TestStatusKind::Running {
+                    *state = next_state;
+                }
+            }
+        } else {
+            self.states = next_states;
+        }
         self.validate_current_states();
         for (status, state) in self.statuses.iter_mut().zip(self.states.iter()) {
             if status.outcome == TestStatusKind::Running && state.frame >= self.config.max_ticks {
@@ -748,6 +896,17 @@ pub enum TestStatusKind {
     TimedOut,
 }
 
+impl fmt::Display for TestStatusKind {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Running => f.write_str("running"),
+            Self::Passed => f.write_str("passed"),
+            Self::Failed => f.write_str("failed"),
+            Self::TimedOut => f.write_str("timed_out"),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct TestStatus {
     pub world_id: usize,
@@ -768,6 +927,13 @@ impl TestStatus {
             frame,
             message: None,
         }
+    }
+
+    pub fn is_failure(&self) -> bool {
+        matches!(
+            self.outcome,
+            TestStatusKind::Failed | TestStatusKind::TimedOut
+        )
     }
 }
 
@@ -830,6 +996,169 @@ impl TestReport {
 
     pub fn is_success(&self) -> bool {
         self.failed() == 0
+    }
+}
+
+pub fn print_report(report: &TestReport, mode: TestReportMode) {
+    println!(
+        "testing finished: {} passed, {} failed",
+        report.passed(),
+        report.failed()
+    );
+
+    match mode {
+        TestReportMode::Summary => {}
+        TestReportMode::All => {
+            for status in &report.statuses {
+                print_status(status);
+            }
+        }
+        TestReportMode::Failures => {
+            for status in report.statuses.iter().filter(|status| status.is_failure()) {
+                print_status(status);
+            }
+        }
+        TestReportMode::FailureDetails => {
+            for (status, state) in report
+                .statuses
+                .iter()
+                .zip(report.final_states.iter())
+                .filter(|(status, _)| status.is_failure())
+            {
+                print_status(status);
+                print_state("  final", state);
+            }
+        }
+    }
+}
+
+fn print_status(status: &TestStatus) {
+    match &status.message {
+        Some(message) => println!(
+            "[{}] frame={} world={} {}: {}",
+            status.outcome, status.frame, status.world_id, status.name, message
+        ),
+        None => println!(
+            "[{}] frame={} world={} {}",
+            status.outcome, status.frame, status.world_id, status.name
+        ),
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct TestTrace {
+    pub name: String,
+    pub status: TestStatus,
+    pub states: Vec<WorldState>,
+}
+
+pub fn trace_plan<T>(
+    config: TestRunnerConfig,
+    plan: TestPlan<T>,
+    patterns: &[String],
+    failed_names: Option<&[&str]>,
+    trace_every: u64,
+) -> Vec<TestTrace>
+where
+    T: SimTest,
+{
+    plan.into_cases()
+        .into_iter()
+        .filter(|case| should_trace(&case.display_name(), patterns, failed_names))
+        .map(|case| trace_case(config.clone(), case, trace_every.max(1)))
+        .collect()
+}
+
+fn should_trace(name: &str, patterns: &[String], failed_names: Option<&[&str]>) -> bool {
+    let pattern_match = patterns.is_empty()
+        || patterns
+            .iter()
+            .any(|pattern| name.contains(pattern.as_str()));
+    let failed_match = failed_names.is_none_or(|names| names.contains(&name));
+    pattern_match && failed_match
+}
+
+fn trace_case<T>(config: TestRunnerConfig, case: TestCase<T>, trace_every: u64) -> TestTrace
+where
+    T: SimTest,
+{
+    let name = case.display_name();
+    let mut batch = TestBatch::new(config, vec![case]);
+    let mut states = vec![batch.states[0].clone()];
+    let mut last_outcome = batch.statuses[0].outcome;
+
+    while !batch.is_finished() {
+        batch.step_once();
+        let status = &batch.statuses[0];
+        if batch.states[0].frame % trace_every == 0 || status.outcome != last_outcome {
+            states.push(batch.states[0].clone());
+        }
+        last_outcome = status.outcome;
+    }
+
+    TestTrace {
+        name,
+        status: batch.statuses.remove(0),
+        states,
+    }
+}
+
+pub fn print_traces(traces: &[TestTrace]) {
+    if traces.is_empty() {
+        println!("trace: no matching tests");
+        return;
+    }
+
+    for trace in traces {
+        println!();
+        println!("trace: {}", trace.name);
+        print_status(&trace.status);
+        for state in &trace.states {
+            print_state("  frame", state);
+        }
+    }
+}
+
+fn print_state(prefix: &str, state: &WorldState) {
+    println!(
+        "{prefix}={} t={:.3} ball=({:.3},{:.3},{:.3}) ball_vel=({:.3},{:.3},{:.3}) goal_blue={} goal_yellow={} blue={} yellow={}",
+        state.frame,
+        state.sim_time,
+        state.ball.x,
+        state.ball.y,
+        state.ball.z,
+        state.ball.vx,
+        state.ball.vy,
+        state.ball.vz,
+        state.goal_blue,
+        state.goal_yellow,
+        format_robots(&state.blue_robots),
+        format_robots(&state.yellow_robots),
+    );
+}
+
+fn format_robots(robots: &[simhark::RobotState]) -> String {
+    let active = robots
+        .iter()
+        .filter(|robot| robot.is_on)
+        .map(|robot| {
+            format!(
+                "#{}@({:.3},{:.3},{:.2}deg) v=({:.3},{:.3}) ir={}",
+                robot.id,
+                robot.x,
+                robot.y,
+                robot.orientation.to_degrees(),
+                robot.vx,
+                robot.vy,
+                robot.infrared
+            )
+        })
+        .collect::<Vec<_>>();
+
+    if active.is_empty() {
+        "[]".to_owned()
+    } else {
+        format!("[{}]", active.join(", "))
     }
 }
 
