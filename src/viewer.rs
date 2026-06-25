@@ -333,7 +333,7 @@ impl ViewerServer {
         let selected_worlds = selected_worlds_snapshot(&self.selected_worlds, self.world_count);
         let selected_states = selected_worlds
             .iter()
-            .filter_map(|world| selected_state(states, *world))
+            .filter_map(|world| state_by_world_id(states, *world))
             .collect::<Vec<_>>();
         let frame = ViewerFrame {
             world_count: self.world_count,
@@ -554,8 +554,13 @@ fn selected_state(states: &[WorldState], selected_world: usize) -> Option<&World
     if states.is_empty() {
         return None;
     }
-    let index = selected_world.min(states.len().saturating_sub(1));
-    states.get(index)
+    state_by_world_id(states, selected_world)
+        .or_else(|| states.get(selected_world))
+        .or_else(|| states.first())
+}
+
+fn state_by_world_id(states: &[WorldState], selected_world: usize) -> Option<&WorldState> {
+    states.iter().find(|state| state.world_id == selected_world)
 }
 
 const FRONTEND_HTML: &str = include_str!("../frontend/dist/index.html");

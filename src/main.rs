@@ -84,8 +84,7 @@ fn main() {
                 server
                     .step(&mut engine)
                     .expect("grSim compatibility server step failed");
-                let state = engine.world(viewer.selected_world()).get_state();
-                viewer.publish(&state);
+                publish_viewer_frame(viewer, &engine);
             }
         }
 
@@ -104,9 +103,7 @@ fn main() {
             let command = demo_command(step, num_worlds);
             engine.advance_with_commands(&command);
 
-            let selected_world = viewer.selected_world();
-            let viewer_state = engine.world(selected_world).get_state();
-            viewer.publish(&viewer_state);
+            publish_viewer_frame(viewer, &engine);
 
             if step == 0 || step == num_steps - 1 {
                 log_sample_state(step, &engine.world(0).get_state());
@@ -143,6 +140,17 @@ fn main() {
         "Real-time factor per world: {:.1}x (at 60 FPS)",
         steps_per_sec / num_worlds as f64 / 60.0
     );
+}
+
+#[cfg(feature = "viewer")]
+fn publish_viewer_frame(viewer: &ViewerServer, engine: &SimulationEngine) {
+    if viewer.selected_worlds().len() > 1 {
+        let states = engine.get_all_states();
+        viewer.publish_states(&states);
+    } else {
+        let state = engine.world(viewer.selected_world()).get_state();
+        viewer.publish(&state);
+    }
 }
 
 fn log_sample_state(step: usize, state: &simhark::WorldState) {

@@ -1,6 +1,7 @@
 //! Batch test runner for simhark simulations.
 
 use std::borrow::Cow;
+use std::collections::HashMap;
 use std::env;
 use std::fmt;
 use std::thread;
@@ -493,7 +494,7 @@ impl TestRunner {
         )?;
         viewer.enable_web_control();
         viewer.set_test_suite(batch.viewer_snapshot());
-        viewer.publish(batch.selected_state(viewer.selected_world()));
+        publish_batch_viewer_frame(&viewer, &batch);
         println!("viewer: {} (testing mode)", viewer_config.http_url());
 
         loop {
@@ -502,10 +503,14 @@ impl TestRunner {
             }
 
             if viewer.take_restart_request() {
-                batch = TestBatch::new(self.config.clone(), make_tests().into_iter().collect());
+                let selected_worlds = viewer.selected_worlds();
+                batch.rerun_worlds(
+                    make_tests().into_iter().collect(),
+                    selected_worlds.as_slice(),
+                );
                 viewer.reset_goals();
                 viewer.set_test_suite(batch.viewer_snapshot());
-                viewer.publish(batch.selected_state(viewer.selected_world()));
+                publish_batch_viewer_frame(&viewer, &batch);
             }
 
             if viewer.is_running() && !batch.is_finished() {
@@ -513,7 +518,7 @@ impl TestRunner {
                 viewer.set_test_suite(batch.viewer_snapshot());
             }
 
-            viewer.publish(batch.selected_state(viewer.selected_world()));
+            publish_batch_viewer_frame(&viewer, &batch);
 
             if batch.is_finished() && !viewer.is_running() {
                 break;
@@ -544,7 +549,7 @@ impl TestRunner {
         )?;
         viewer.enable_web_control();
         viewer.set_test_suite(session.viewer_snapshot());
-        viewer.publish(session.selected_state(viewer.selected_world()));
+        publish_session_viewer_frame(&viewer, &session);
         println!("viewer: {} (testing mode)", viewer_config.http_url());
 
         loop {
@@ -553,10 +558,11 @@ impl TestRunner {
             }
 
             if viewer.take_restart_request() {
-                session = PlanSession::new(self.config.clone(), make_plan());
+                let selected_worlds = viewer.selected_worlds();
+                session.rerun_worlds(make_plan(), selected_worlds.as_slice());
                 viewer.reset_goals();
                 viewer.set_test_suite(session.viewer_snapshot());
-                viewer.publish(session.selected_state(viewer.selected_world()));
+                publish_session_viewer_frame(&viewer, &session);
             }
 
             if viewer.is_running() && !session.is_finished() {
@@ -564,7 +570,7 @@ impl TestRunner {
                 viewer.set_test_suite(session.viewer_snapshot());
             }
 
-            viewer.publish(session.selected_state(viewer.selected_world()));
+            publish_session_viewer_frame(&viewer, &session);
 
             if session.is_finished() && !viewer.is_running() {
                 break;
@@ -580,6 +586,30 @@ impl TestRunner {
 impl Default for TestRunner {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+#[cfg(feature = "viewer")]
+fn publish_batch_viewer_frame<T>(viewer: &simhark::viewer::ViewerServer, batch: &TestBatch<T>)
+where
+    T: SimTest,
+{
+    if viewer.selected_worlds().len() > 1 {
+        viewer.publish_states(batch.states());
+    } else {
+        viewer.publish(batch.selected_state(viewer.selected_world()));
+    }
+}
+
+#[cfg(feature = "viewer")]
+fn publish_session_viewer_frame<T>(viewer: &simhark::viewer::ViewerServer, session: &PlanSession<T>)
+where
+    T: SimTest,
+{
+    if viewer.selected_worlds().len() > 1 {
+        viewer.publish_states(session.states());
+    } else {
+        viewer.publish(session.selected_state(viewer.selected_world()));
     }
 }
 
@@ -628,6 +658,14 @@ where
 
     fn selected_state(&self, selected_world: usize) -> &WorldState {
         self.batch.selected_state(selected_world)
+    }
+
+    fn states(&self) -> &[WorldState] {
+        self.batch.states()
+    }
+
+    fn rerun_worlds(&mut self, fresh_plan: TestPlan<T>, worlds: &[usize]) {
+        self.batch.rerun_worlds(fresh_plan.into_cases(), worlds);
     }
 
     fn is_finished(&self) -> bool {
@@ -755,6 +793,56 @@ where
     fn selected_state(&self, selected_world: usize) -> &WorldState {
         let index = selected_world.min(self.states.len().saturating_sub(1));
         &self.states[index]
+    }
+
+    fn states(&self) -> &[WorldState] {
+        &self.states
+    }
+
+    fn rerun_worlds(&mut self, fresh_tests: Vec<TestCase<T>>, worlds: &[usize]) {
+        let mut fresh_by_name = fresh_tests
+            .into_iter()
+            .map(|case| (case.display_name(), case))
+            .collect::<HashMap<_, _>>();
+        let mut indices = worlds
+            .iter()
+            .copied()
+            .filter(|index| *index < self.tests.len())
+            .collect::<Vec<_>>();
+        indices.sort_unstable();
+        indices.dedup();
+
+        let mut setup_indices = Vec::new();
+        let mut setup_commands = Vec::new();
+
+        for index in indices {
+            let name = self.tests[index].display_name();
+            let Some(fresh_test) = fresh_by_name.remove(&name) else {
+                continue;
+            };
+            let initial = fresh_test.test.initial_state();
+            validate_initials(std::slice::from_ref(&initial));
+            self.tests[index] = fresh_test;
+            self.statuses[index] =
+                TestStatus::running(index, self.tests[index].path.clone(), name, 0);
+            setup_indices.push(index);
+            setup_commands.push(setup_command(
+                &initial,
+                self.config.world_config.robots_per_team,
+            ));
+        }
+
+        if setup_indices.is_empty() {
+            return;
+        }
+
+        self.engine.reset_worlds(&setup_indices);
+        let reset_states = self.engine.step_subset(&setup_indices, &setup_commands);
+        for (index, state) in setup_indices.into_iter().zip(reset_states.into_iter()) {
+            self.statuses[index].frame = state.frame;
+            self.states[index] = state;
+        }
+        self.validate_current_states();
     }
 
     fn run_to_completion(&mut self) {
