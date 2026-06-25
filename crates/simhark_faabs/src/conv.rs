@@ -2,14 +2,14 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use simhark::WorldState;
 use simhark::state::{KickStatus, RobotState};
-use CrashPilot::core_dump;
-use CrashPilot::core_dump::proto::{self as cp_proto, RobotCp, SslDetectionBall, SslDetectionFrame, SslDetectionRobot, SslWrapperPacket, Team, TrackedBall, TrackedFrame, TrackedRobot, TrackerWrapperPacket, Vector2, Vector3};
+use crashpilot::core_dump;
+use crashpilot::core_dump::proto::{self as cp_proto, RobotCp, SslDetectionBall, SslDetectionFrame, SslDetectionRobot, SslWrapperPacket, Team, TrackedBall, TrackedFrame, TrackedRobot, TrackerWrapperPacket, Vector2, Vector3};
 use core_dump::proto::{
     CpBall, CpCommand, CpRobot, CpTrackedRobot, CpVector2,
 };
 use tf_jetsoncode::TeensyRecMSG;
 
-pub fn world_state_to_cp_events(events: &mut ::CrashPilot::Events, state: &WorldState) {
+pub fn world_state_to_cp_events(events: &mut ::crashpilot::Events, state: &WorldState) {
     events.raw = world_state_to_ssl_wrapper(state);
     events.tracked = world_state_to_tracker_wrapper(state);
 }

@@ -5,7 +5,7 @@ edition = "2024"
 
 [dependencies]
 simhark = { path = "../.." }
-CrashPilot = { git = "https://github.com/Technulgy-LGNU/CrashPilot" }
+crashpilot = { git = "https://github.com/Technulgy-LGNU/CrashPilot" }
 tf_jetsoncode = { git = "https://github.com/Technulgy-LGNU/teamfaabs-ssl-robot-code" }
 referris-simhark = { git = "https://github.com/Technulgy-LGNU/referris" }
 referris = { git = "https://github.com/Technulgy-LGNU/referris" }
@@ -16,5 +16,5 @@ prost = { version = "0.14.3", optional = true }
 
 [features]
 default = []
-interface = ["dep:tokio", "dep:tokio-tungstenite", "dep:futures-util", "dep:prost", "CrashPilot/interface"]
+interface = ["dep:tokio", "dep:tokio-tungstenite", "dep:futures-util", "dep:prost", "crashpilot/interface"]
 

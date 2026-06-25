@@ -7,8 +7,8 @@ use crate::conv::world_state_to_cp_events;
 #[cfg(feature = "interface")]
 use crate::interface::EventShare;
 use crate::run::run_sim_action;
-use ::CrashPilot::CrashPilot;
-use ::CrashPilot::config::{LoggingConfig, RobotConfig, ServerConfig, SslConfig};
+use ::crashpilot::CrashPilot;
+use ::crashpilot::config::{LoggingConfig, RobotConfig, ServerConfig, SslConfig};
 use simhark::{WorldCommand, WorldState};
 use std::collections::HashMap;
 use std::mem;
@@ -19,11 +19,11 @@ pub struct Faabs {
     pub robots: Vec<Robot<()>>,
     pub crash_pilot: CrashPilot<()>,
     pub feedback_robot: u32,
-    pub events: ::CrashPilot::Events,
+    pub events: ::crashpilot::Events,
     #[cfg(feature = "interface")]
     pub interface: EventShare,
     #[cfg(feature = "interface")]
-    pub ws_out: ::CrashPilot::communication::WebsocketOut,
+    pub ws_out: ::crashpilot::communication::WebsocketOut,
 }
 
 impl Faabs {
@@ -37,7 +37,7 @@ impl Faabs {
             let tx = faabs.interface.clone();
             let ws_out = faabs.ws_out.clone();
 
-            ::CrashPilot::interface::spawn_interface();
+            ::crashpilot::interface::spawn_interface();
 
             tokio::spawn(async move {
                 crate::interface::spawn_websocket(&cfg, tx, ws_out).await;
@@ -61,11 +61,11 @@ impl Faabs {
             robots,
             crash_pilot: CrashPilot::new(get_config()),
             feedback_robot: 0,
-            events: ::CrashPilot::Events::default(),
+            events: ::crashpilot::Events::default(),
             #[cfg(feature = "interface")]
             interface: EventShare::default(),
             #[cfg(feature = "interface")]
-            ws_out: ::CrashPilot::communication::WebsocketOut::new(),
+            ws_out: ::crashpilot::communication::WebsocketOut::new(),
         }
     }
 
@@ -119,7 +119,7 @@ impl Faabs {
     }
 }
 
-fn get_config() -> ::CrashPilot::Config {
+fn get_config() -> ::crashpilot::Config {
     let mut robots = HashMap::new();
 
     robots.insert(
@@ -165,7 +165,7 @@ fn get_config() -> ::CrashPilot::Config {
         },
     );
 
-    ::CrashPilot::Config {
+    ::crashpilot::Config {
         ssl: SslConfig::default(),
         server: ServerConfig::default(),
         logging: LoggingConfig::default(),
