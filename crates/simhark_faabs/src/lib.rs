@@ -6,7 +6,7 @@ mod run;
 use crate::conv::world_state_to_cp_events;
 #[cfg(feature = "interface")]
 use crate::interface::EventShare;
-use crate::run::run_sim_action;
+pub use crate::run::run_sim_action;
 use ::crashpilot::CrashPilot;
 use ::crashpilot::config::{LoggingConfig, RobotConfig, ServerConfig, SslConfig};
 use simhark::{WorldCommand, WorldState};
@@ -27,7 +27,6 @@ pub struct Faabs {
 }
 
 impl Faabs {
-    #[cfg(feature = "interface")]
     pub fn with_interface(num_robots: u8) -> Self {
         let faabs = Self::new(num_robots);
 
@@ -73,7 +72,7 @@ impl Faabs {
         &mut self,
         state: &WorldState,
         command: &mut WorldCommand,
-        referee: Option<::CrashPilot::core_dump::proto::Referee>,
+        referee: Option<::crashpilot::core_dump::proto::Referee>,
     ) {
         world_state_to_cp_events(&mut self.events, state);
         self.events.gc = referee;

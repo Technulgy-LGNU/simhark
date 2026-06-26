@@ -5,6 +5,7 @@ edition = "2024"
 
 [dependencies]
 simhark = { path = "../.." }
+simhark_testing = { path = "../simhark_testing", optional = true }
 crashpilot = { git = "https://github.com/Technulgy-LGNU/CrashPilot" }
 tf_jetsoncode = { git = "https://github.com/Technulgy-LGNU/teamfaabs-ssl-robot-code" }
 referris-simhark = { git = "https://github.com/Technulgy-LGNU/referris" }
@@ -16,5 +17,10 @@ prost = { version = "0.14.3", optional = true }
 
 [features]
 default = []
-interface = ["dep:tokio", "dep:tokio-tungstenite", "dep:futures-util", "dep:prost", "crashpilot/interface"]
+viewer = ["simhark_testing/viewer"]
+interface = ["dep:tokio-tungstenite", "dep:futures-util", "dep:prost", "crashpilot/interface"]
+testing = ["dep:simhark_testing"]
 
+[[bin]]
+path = "src/bin/goalie_tests.rs"
+required-features = ["testing"]
