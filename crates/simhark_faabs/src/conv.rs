@@ -181,7 +181,7 @@ pub fn robot_events(
     }
 
     tf_jetsoncode::Events {
-        cp: Some(cp_robot_msg(cp_data.msg)),
+        cp: Some(cp_data.msg),
         vis: None,
         teensy: Some(TeensyRecMSG {
             flags,
@@ -191,60 +191,6 @@ pub fn robot_events(
     }
 }
 
-fn cp_robot_msg(msg: core_dump::proto::CpRobot) -> CpRobot {
-    CpRobot {
-        robot_id: msg.robot_id,
-        timestamp: msg.timestamp,
-        packet_id: msg.packet_id,
-        ball: cp_ball(msg.ball),
-        robots_yellow: msg
-            .robots_yellow
-            .into_iter()
-            .map(cp_tracked_robot)
-            .collect(),
-        robots_blue: msg.robots_blue.into_iter().map(cp_tracked_robot).collect(),
-        cmd: cp_command(msg.cmd),
-        infos: Default::default(),
-    }
-}
-
-#[inline]
-fn cp_vec2(v: core_dump::proto::CpVector2) -> CpVector2 {
-    CpVector2 { x: v.x, y: v.y }
-}
-
-#[inline]
-fn cp_ball(b: core_dump::proto::CpBall) -> CpBall {
-    CpBall {
-        pos: cp_vec2(b.pos),
-        vel: b.vel.map(cp_vec2),
-    }
-}
-
-#[inline]
-fn cp_tracked_robot(r: core_dump::proto::CpTrackedRobot) -> CpTrackedRobot {
-    CpTrackedRobot {
-        robot_id: r.robot_id,
-        pos: cp_vec2(r.pos),
-        orientation: r.orientation,
-        vel: r.vel.map(cp_vec2),
-        visibility: r.visibility,
-    }
-}
-
-#[inline]
-fn cp_command(c: core_dump::proto::CpCommand) -> CpCommand {
-    CpCommand {
-        state: c.state,
-        task: c.task,
-        pos: c.pos.map(cp_vec2),
-        speed: c.speed,
-        orientation: c.orientation,
-        kick_orient: c.kick_orient,
-        kick_speed: c.kick_speed,
-        enemy_id: c.enemy_id,
-    }
-}
 
 pub fn robot_cp(cp: RobotCp) -> RobotCp {
     core_dump::proto::RobotCp {
