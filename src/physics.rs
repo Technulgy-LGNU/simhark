@@ -409,7 +409,7 @@ impl PhysicsWorld {
             .pose(chassis_iso.into())
             .linear_damping(0.5)
             .angular_damping(1.0)
-            .ccd_enabled(true)
+            .ccd_enabled(false)
             .enabled_rotations(false, false, true)
             // Pin the chassis at start_z so we don't need to model wheels.
             .enabled_translations(true, true, false)
