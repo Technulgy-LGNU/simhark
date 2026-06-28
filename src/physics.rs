@@ -230,7 +230,7 @@ impl PhysicsWorld {
             .translation(to_rapier_vec(ball_pos))
             .linear_damping(config.ball.linear_damping as f32)
             .angular_damping(config.ball.angular_damping as f32)
-            .ccd_enabled(true)
+            .ccd_enabled(false)
             .build();
         let ball_body = rigid_body_set.insert(ball_rb);
         let ball_collider = collider_set.insert_with_parent(
