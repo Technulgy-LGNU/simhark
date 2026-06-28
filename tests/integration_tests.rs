@@ -483,6 +483,57 @@ fn test_kick_contact_reenables_without_followup_command() {
 }
 
 #[test]
+fn test_infrared_requires_ball_in_front_of_robot() {
+    let mut config = WorldConfig::division_a();
+    config.robots_per_team = 1;
+
+    let center_from_kicker = config.blue_robots.center_from_kicker;
+    let half_width = (config.blue_robots.radius * config.blue_robots.radius
+        - center_from_kicker * center_from_kicker)
+        .max(0.0)
+        .sqrt();
+
+    assert!(blue_infrared_for_ball_offset(
+        &config,
+        center_from_kicker + config.ball.radius * 0.5,
+        0.0
+    ));
+    assert!(!blue_infrared_for_ball_offset(
+        &config,
+        -config.ball.radius,
+        0.0
+    ));
+    assert!(!blue_infrared_for_ball_offset(
+        &config,
+        center_from_kicker - 0.02,
+        half_width + config.ball.radius + 0.005
+    ));
+}
+
+fn blue_infrared_for_ball_offset(config: &WorldConfig, ball_dx: f64, ball_dy: f64) -> bool {
+    let robot_x = -3.0;
+    let robot_y = -3.0;
+    let mut world = World::new(0, config.clone());
+    let robot = world.physics.blue_robots[0].clone();
+    world.physics.teleport_body(
+        robot.chassis_body,
+        robot_x as f32,
+        robot_y as f32,
+        config.blue_robots.start_z() as f32,
+    );
+    world.physics.set_body_yaw(robot.chassis_body, 0.0);
+    let ball_body = world.physics.ball_body;
+    world.physics.teleport_body(
+        ball_body,
+        (robot_x + ball_dx) as f32,
+        (robot_y + ball_dy) as f32,
+        (config.ball.radius + 0.005) as f32,
+    );
+
+    world.get_state().blue_robots[0].infrared
+}
+
+#[test]
 fn test_teleport_robot_off_field() {
     let mut world = World::new(0, WorldConfig::division_a());
 

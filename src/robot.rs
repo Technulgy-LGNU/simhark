@@ -6,6 +6,8 @@
 use crate::config::RobotConfig;
 use crate::geometry::deg2rad;
 
+const KICKER_CONTACT_MIN_FORWARD_ALIGNMENT: f64 = std::f64::consts::FRAC_1_SQRT_2;
+
 /// Per-robot mutable simulation state (not physics handles, but game state).
 #[derive(Debug, Clone)]
 pub struct RobotSim {
@@ -166,7 +168,11 @@ impl RobotSim {
     }
 
     pub fn initial_dir_deg(&self) -> f64 {
-        if self.dir_sign < 0.0 { 180.0 } else { 0.0 }
+        if self.dir_sign < 0.0 {
+            180.0
+        } else {
+            0.0
+        }
     }
 }
 
@@ -187,6 +193,21 @@ pub fn is_ball_touching_kicker(
     let bx = ball_pos[0];
     let by = ball_pos[1];
     let bz = ball_pos[2];
+    let rel_x = bx - robot_pos[0];
+    let rel_y = by - robot_pos[1];
+    let forward = rel_x * dx + rel_y * dy;
+    let distance_sq = rel_x * rel_x + rel_y * rel_y;
+    if distance_sq <= f64::EPSILON {
+        return false;
+    }
+    let alignment = forward / distance_sq.sqrt();
+    if alignment < KICKER_CONTACT_MIN_FORWARD_ALIGNMENT {
+        return false;
+    }
+    if forward < center_from_kicker - ball_radius - tolerance {
+        return false;
+    }
+
     let kicker_center_x = robot_pos[0] + dx * center_from_kicker;
     let kicker_center_y = robot_pos[1] + dy * center_from_kicker;
     let half_width = (robot_radius * robot_radius - center_from_kicker * center_from_kicker)
@@ -215,4 +236,51 @@ pub fn is_ball_touching_kicker(
     let zz = (robot_pos[2] - bz).abs();
 
     line_distance <= ball_radius + tolerance && zz <= kicker_height * 0.5 + ball_radius
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const ROBOT_POS: [f64; 3] = [0.0, 0.0, 0.0];
+    const ROBOT_DIR: [f64; 2] = [1.0, 0.0];
+    const CENTER_FROM_KICKER: f64 = 0.073;
+    const ROBOT_RADIUS: f64 = 0.09;
+    const KICKER_HEIGHT: f64 = 0.04;
+    const BALL_RADIUS: f64 = 0.0215;
+    const TOLERANCE: f64 = 0.02;
+
+    fn touching_at(x: f64, y: f64) -> bool {
+        is_ball_touching_kicker(
+            [x, y, 0.0],
+            ROBOT_POS,
+            ROBOT_DIR,
+            CENTER_FROM_KICKER,
+            ROBOT_RADIUS,
+            KICKER_HEIGHT,
+            BALL_RADIUS,
+            TOLERANCE,
+        )
+    }
+
+    #[test]
+    fn kicker_contact_accepts_ball_in_front() {
+        assert!(touching_at(CENTER_FROM_KICKER + BALL_RADIUS * 0.5, 0.0));
+    }
+
+    #[test]
+    fn kicker_contact_rejects_ball_behind_robot() {
+        assert!(!touching_at(-BALL_RADIUS, 0.0));
+    }
+
+    #[test]
+    fn kicker_contact_rejects_ball_at_side_angle() {
+        let half_width = (ROBOT_RADIUS * ROBOT_RADIUS - CENTER_FROM_KICKER * CENTER_FROM_KICKER)
+            .max(0.0)
+            .sqrt();
+        let forward = CENTER_FROM_KICKER - 0.02;
+        let lateral = half_width + BALL_RADIUS + 0.005;
+
+        assert!(!touching_at(forward, lateral));
+    }
 }

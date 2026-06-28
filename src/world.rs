@@ -15,6 +15,17 @@ const BALL_HOLD_PULL_GAIN: f32 = 180.0;
 const BALL_HOLD_DAMPING_GAIN: f32 = 18.0;
 const BALL_HOLD_MAX_FORCE: f32 = 4.0;
 
+fn field_scaled_dir(yaw: f64, config: &WorldConfig) -> [f64; 2] {
+    let x = yaw.cos() * config.field.field_length;
+    let y = yaw.sin() * config.field.field_width;
+    let len = (x * x + y * y).sqrt();
+    if len <= f64::EPSILON {
+        [1.0, 0.0]
+    } else {
+        [x / len, y / len]
+    }
+}
+
 /// A single simulation world with its own physics and robot state.
 pub struct World {
     pub id: usize,
@@ -199,7 +210,7 @@ impl World {
                 let ball_body = self.physics.ball_body;
                 let ball_pos = self.physics.get_body_position(ball_body);
                 let yaw = self.physics.get_body_yaw(handle.chassis_body) as f64;
-                let dir = [yaw.cos(), yaw.sin()];
+                let dir = field_scaled_dir(yaw, &self.config);
                 let chassis_pos = self.physics.get_body_position(handle.chassis_body);
                 let contact_origin = contact_origin_from_chassis(chassis_pos, &robot_cfg);
 
@@ -348,8 +359,9 @@ impl World {
         let chassis_vel = self.physics.get_body_linvel(handle.chassis_body);
         let chassis_angvel = self.physics.get_body_angvel(handle.chassis_body);
         let yaw = self.physics.get_body_yaw(handle.chassis_body) as f64;
-        let dir_x = yaw.cos();
-        let dir_y = yaw.sin();
+        let dir = field_scaled_dir(yaw, &self.config);
+        let dir_x = dir[0];
+        let dir_y = dir[1];
         let hold_distance = robot_cfg.center_from_kicker
             + robot_cfg.kicker_thickness * 1.5
             + self.config.ball.radius
@@ -427,7 +439,7 @@ impl World {
             .filter(|(_, (sim, _))| sim.is_on && sim.dribbler_on && sim.kick_countdown <= 0)
             .filter_map(|(index, (_, handle))| {
                 let yaw = self.physics.get_body_yaw(handle.chassis_body) as f64;
-                let dir = [yaw.cos(), yaw.sin()];
+                let dir = field_scaled_dir(yaw, &self.config);
                 let chassis_pos = self.physics.get_body_position(handle.chassis_body);
                 let contact_origin = contact_origin_from_chassis(chassis_pos, robot_cfg);
                 let touching = is_ball_touching_kicker(
@@ -476,7 +488,7 @@ impl World {
             return false;
         }
         let yaw = self.physics.get_body_yaw(handle.chassis_body) as f64;
-        let dir = [yaw.cos(), yaw.sin()];
+        let dir = field_scaled_dir(yaw, &self.config);
         let chassis_pos = self.physics.get_body_position(handle.chassis_body);
         let contact_origin = contact_origin_from_chassis(chassis_pos, robot_cfg);
         is_ball_touching_kicker(
@@ -676,7 +688,7 @@ impl World {
                 let yaw = self.physics.get_body_yaw(handle.chassis_body);
 
                 // Check infrared (ball near kicker)
-                let dir = [yaw.cos() as f64, yaw.sin() as f64];
+                let dir = field_scaled_dir(yaw as f64, &self.config);
                 let contact_origin = contact_origin_from_chassis(pos, robot_cfg);
                 // Sumatra's barrier bit needs to stay high for the robot that
                 // currently owns the dribbled ball. The geometric kicker test
@@ -693,7 +705,7 @@ impl World {
                         robot_cfg.radius,
                         robot_cfg.kicker_height,
                         self.config.ball.radius,
-                        0.02,
+                        BALL_CONTACT_TOLERANCE
                     );
 
                 let kick_status = match sim.kick_type {
