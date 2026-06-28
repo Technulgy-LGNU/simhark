@@ -10,7 +10,8 @@ crashpilot = { git = "https://github.com/Technulgy-LGNU/CrashPilot" }
 tf_jetsoncode = { git = "https://github.com/Technulgy-LGNU/teamfaabs-ssl-robot-code" }
 referris-simhark = { git = "https://github.com/Technulgy-LGNU/referris" }
 referris = { git = "https://github.com/Technulgy-LGNU/referris" }
-tokio = { version = "1.52.3", optional = true }
+core_dump = { git = "https://github.com/Technulgy-LGNU/core-dump" }
+tokio = { version = "1.52.3" }
 tokio-tungstenite = { version = "0.29.0", optional = true }
 futures-util = { version = "0.3.32", optional = true }
 prost = { version = "0.14.3", optional = true }
@@ -22,5 +23,6 @@ interface = ["dep:tokio-tungstenite", "dep:futures-util", "dep:prost", "crashpil
 testing = ["dep:simhark_testing"]
 
 [[bin]]
+name = "goalie_tests"
 path = "src/bin/goalie_tests.rs"
 required-features = ["testing"]

@@ -1,5 +1,6 @@
 use simhark::{MoveCommand, RobotCommand, WorldCommand};
-use tf_jetsoncode::{CpState, TeensySendMsg, send_flags};
+use tf_jetsoncode::{TeensySendMsg, send_flags};
+use core_dump::proto::CpState;
 
 const HEADING_GAIN: f64 = 6.0;
 const MAX_ANGULAR: f64 = 20.0;

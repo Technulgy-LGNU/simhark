@@ -20,6 +20,7 @@ const SPEEDS: [f64; 4] = [2.5, 3.5, 4.5, 5.5];
 const DEFENSE_PASS_FRAME: u64 = 260;
 
 fn main() -> std::io::Result<()> {
+    #[cfg(not(feature = "viewer"))]
     let cli = match TestCli::from_env() {
         Ok(cli) => cli,
         Err(error) => {
