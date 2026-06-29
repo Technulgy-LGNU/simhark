@@ -7,30 +7,29 @@ use crate::conv::world_state_to_cp_events;
 #[cfg(feature = "interface")]
 use crate::interface::EventShare;
 pub use crate::run::run_sim_action;
-use ::crashpilot::CrashPilot;
-use ::crashpilot::config::{LoggingConfig, RobotConfig, ServerConfig, SslConfig};
-use simhark::{WorldCommand, WorldState};
+use crashpilot::CrashPilot;
+use crashpilot::config::{LoggingConfig, RobotConfig, ServerConfig, SslConfig};
+use core_dump::types::{Ai, DummyAi};
 use simhark::{TeamColor, WorldCommand, WorldState};
 use std::collections::HashMap;
 use std::mem;
 use std::net::Ipv4Addr;
 use tf_jetsoncode::Robot;
 
-pub struct Faabs {
+pub struct Faabs<A: Ai = DummyAi> {
     pub robots: Vec<Robot<()>>,
-    pub crash_pilot: CrashPilot<()>,
+    pub crash_pilot: CrashPilot<(), A>,
     pub feedback_robot: u32,
     pub events: ::crashpilot::Events,
     pub team: TeamColor,
+    pub events: crashpilot::Events,
     #[cfg(feature = "interface")]
     pub interface: EventShare,
     #[cfg(feature = "interface")]
-    pub ws_out: ::crashpilot::communication::WebsocketOut,
+    pub ws_out: crashpilot::communication::WebsocketOut,
 }
 
-impl Faabs {
-    pub fn with_interface(num_robots: u8) -> Self {
-        let faabs = Self::new(num_robots);
+impl<A: Ai + Default + Send> Faabs<A> {
     pub fn with_interface(num_robots: u8, team: TeamColor) -> Self {
         let faabs = Self::new(num_robots, team);
 
@@ -40,7 +39,7 @@ impl Faabs {
             let tx = faabs.interface.clone();
             let ws_out = faabs.ws_out.clone();
 
-            ::crashpilot::interface::spawn_interface();
+            crashpilot::interface::spawn_interface();
 
             tokio::spawn(async move {
                 crate::interface::spawn_websocket(&cfg, tx, ws_out).await;
@@ -64,12 +63,12 @@ impl Faabs {
             robots,
             crash_pilot: CrashPilot::new(get_config(num_robots)),
             feedback_robot: 0,
-            events: ::crashpilot::Events::default(),
             team,
+            events: crashpilot::Events::default(),
             #[cfg(feature = "interface")]
             interface: EventShare::default(),
             #[cfg(feature = "interface")]
-            ws_out: ::crashpilot::communication::WebsocketOut::new(),
+            ws_out: crashpilot::communication::WebsocketOut::new(),
         }
     }
 
@@ -77,7 +76,7 @@ impl Faabs {
         &mut self,
         state: &WorldState,
         command: &mut WorldCommand,
-        referee: Option<::crashpilot::core_dump::proto::Referee>,
+        referee: Option<core_dump::proto::Referee>,
     ) {
         world_state_to_cp_events(&mut self.events, state);
         self.events.gc = referee;

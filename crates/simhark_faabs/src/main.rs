@@ -1,5 +1,5 @@
 use referris::RefereeState;
-use simhark::{SimulationEngine, WorldCommand, WorldConfig};
+use simhark::{SimulationEngine, TeamColor, WorldCommand, WorldConfig};
 use simhark_faabs::Faabs;
 use std::thread;
 
@@ -24,7 +24,7 @@ fn run() {
 
     let mut referris = referris_simhark::ReferrisDriver::new(&config);
 
-    let mut faabs = Faabs::with_interface(6);
+    let mut faabs = Faabs::<DummyAi>::with_interface(6, TeamColor::Yellow);
 
     let command = WorldCommand::default();
 
