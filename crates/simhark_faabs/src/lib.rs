@@ -20,6 +20,7 @@ pub struct Faabs {
     pub crash_pilot: CrashPilot<()>,
     pub feedback_robot: u32,
     pub events: ::crashpilot::Events,
+    pub team: TeamColor,
     #[cfg(feature = "interface")]
     pub interface: EventShare,
     #[cfg(feature = "interface")]
@@ -29,6 +30,8 @@ pub struct Faabs {
 impl Faabs {
     pub fn with_interface(num_robots: u8) -> Self {
         let faabs = Self::new(num_robots);
+    pub fn with_interface(num_robots: u8, team: TeamColor) -> Self {
+        let faabs = Self::new(num_robots, team);
 
         #[cfg(feature = "interface")]
         {
@@ -46,7 +49,7 @@ impl Faabs {
         faabs
     }
 
-    pub fn new(num_robots: u8) -> Self {
+    pub fn new(num_robots: u8, team: TeamColor) -> Self {
         let mut robots = Vec::with_capacity(num_robots as usize);
 
         for i in 0..num_robots {
@@ -61,6 +64,7 @@ impl Faabs {
             crash_pilot: CrashPilot::new(get_config()),
             feedback_robot: 0,
             events: ::crashpilot::Events::default(),
+            team,
             #[cfg(feature = "interface")]
             interface: EventShare::default(),
             #[cfg(feature = "interface")]
@@ -102,11 +106,11 @@ impl Faabs {
                 );
             };
 
-            let events = conv::robot_events(id, data, state);
+            let events = conv::robot_events(id, data, state, self.team);
 
             let (teensy, robot_cp) = robot.step_with_data(events);
 
-            run_sim_action(id, teensy, command);
+            run_sim_action(id, teensy, command, self.team);
 
             if self.feedback_robot == id {
                 self.events.rf = Some(conv::robot_cp(robot_cp));

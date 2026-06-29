@@ -1,14 +1,13 @@
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use core_dump::proto::{CpBall, CpCommand, CpRobot, CpTrackedRobot, CpVector2};
-use crashpilot::core_dump;
-use crashpilot::core_dump::proto::{
-    self as cp_proto, RobotCp, SslDetectionBall, SslDetectionFrame, SslDetectionRobot,
+use core_dump::proto::{
+    RobotCp, SslDetectionBall, SslDetectionFrame, SslDetectionRobot,
     SslGeometryData, SslGeometryFieldSize, SslWrapperPacket, Team, TrackedBall, TrackedFrame,
     TrackedRobot, TrackerWrapperPacket, Vector2, Vector3,
+    RobotId,
 };
 use simhark::state::{KickStatus, RobotState};
-use simhark::{WorldConfig, WorldState};
+use simhark::{TeamColor, WorldConfig, WorldState};
 use tf_jetsoncode::TeensyRecMSG;
 
 pub fn world_state_to_cp_events(events: &mut ::crashpilot::Events, state: &WorldState) {
@@ -135,7 +134,7 @@ fn tracked_robots(out: &mut Vec<TrackedRobot>, robots: &[RobotState], team: Team
             .iter()
             .filter(|robot| robot.is_on)
             .map(|robot| TrackedRobot {
-                robot_id: cp_proto::RobotId {
+                robot_id: RobotId {
                     id: Some(robot.id as u32),
                     team: Some(team as i32),
                 },
@@ -158,8 +157,14 @@ pub fn robot_events(
     robot: u32,
     cp_data: crashpilot::RobotData,
     state: &WorldState,
+    team: TeamColor,
 ) -> tf_jetsoncode::Events {
-    let Some(robot) = state.yellow_robots.iter().find(|r| r.id == robot as usize) else {
+    let team_robots = match team {
+        TeamColor::Yellow => &state.yellow_robots,
+        TeamColor::Blue => &state.blue_robots,
+    };
+    
+    let Some(robot) = team_robots.iter().find(|r| r.id == robot as usize) else {
         panic!("Robot with id {} not found in world state", robot);
     };
 
@@ -191,20 +196,6 @@ pub fn robot_events(
     }
 }
 
-
-pub fn robot_cp(cp: RobotCp) -> RobotCp {
-    core_dump::proto::RobotCp {
-        robot_id: cp.robot_id,
-        battery_voltage: cp.battery_voltage,
-        current: cp.current,
-        kicker_ready: cp.kicker_ready,
-        has_ball: cp.has_ball,
-        has_error: cp.has_error,
-        acting: cp.acting,
-        last_rec_packet: cp.last_rec_packet,
-        timestamp: 0.0,
-    }
-}
 
 fn set_bit(flags: u32, bit: u8) -> u32 {
     flags | (1 << bit)

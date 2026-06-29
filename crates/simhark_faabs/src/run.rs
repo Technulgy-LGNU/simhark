@@ -1,4 +1,4 @@
-use simhark::{MoveCommand, RobotCommand, WorldCommand};
+use simhark::{MoveCommand, RobotCommand, TeamColor, WorldCommand};
 use tf_jetsoncode::{TeensySendMsg, send_flags};
 use core_dump::proto::CpState;
 
@@ -7,11 +7,16 @@ const MAX_ANGULAR: f64 = 20.0;
 const MAX_KICK_SPEED: f64 = 10.0;
 const CHIP_ANGLE_DEG: f64 = 45.0;
 
-pub fn run_sim_action(robot_id: u32, teensy: TeensySendMsg, command: &mut WorldCommand) {
+pub fn run_sim_action(robot_id: u32, teensy: TeensySendMsg, command: &mut WorldCommand, team: TeamColor) {
     let id = robot_id as usize;
 
+    let team_cmds = match team {
+        TeamColor::Yellow => &mut command.yellow,
+        TeamColor::Blue => &mut command.blue,
+    };
+
     if teensy.state == CpState::StateHalt as u8 {
-        command.yellow.push(RobotCommand {
+        team_cmds.push(RobotCommand {
             id,
             move_command: Some(MoveCommand::GlobalVelocity {
                 vx: 0.0,
@@ -48,7 +53,7 @@ pub fn run_sim_action(robot_id: u32, teensy: TeensySendMsg, command: &mut WorldC
 
     let dribbler_on = teensy.flags & send_flags::DRIBBLER != 0;
 
-    command.yellow.push(RobotCommand {
+    team_cmds.push(RobotCommand {
         id,
         move_command: Some(MoveCommand::GlobalVelocity { vx, vy, angular }),
         kick_speed,
