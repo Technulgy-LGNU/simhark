@@ -1,8 +1,0 @@
-syntax = "proto3";
-package edu.tigers.sumatra.sim.net;
-
-import "SimBotAction.proto";
-
-message SimResponse {
-    repeated SimBotAction action = 1;
-}

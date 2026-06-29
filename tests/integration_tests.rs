@@ -8,7 +8,9 @@ use simhark::config::*;
 use simhark::domain_randomization::*;
 use simhark::state::*;
 use simhark::*;
-use simhark_sumatra::{SumatraInstance, SumatraLaunchConfig};
+use simhark_sumatra::{
+    SumatraInstance, SumatraLaunchConfig, SumatraSimNetConfig, SumatraSimNetServer,
+};
 use std::time::{Duration, Instant};
 
 // ============================================================================

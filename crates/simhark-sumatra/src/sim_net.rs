@@ -5,13 +5,13 @@ use std::net::{SocketAddr, TcpListener, TcpStream};
 
 use prost::Message;
 
-use crate::command::{MoveCommand, RobotCommand, WorldCommand};
-use crate::config::RobotConfig;
-use crate::engine::SimulationEngine;
-use crate::state::{TeamColor, WorldState};
+use simhark::command::{MoveCommand, RobotCommand, WorldCommand};
+use simhark::config::RobotConfig;
+use simhark::engine::SimulationEngine;
+use simhark::state::{TeamColor, WorldState};
 
-use crate::proto::sumatra_sim_net::DriveMode;
-use crate::proto::sumatra_sim_net::{
+use crate::proto::DriveMode;
+use crate::proto::{
     BotId, SimBallState, SimBotAction, SimBotState, SimReferee, SimRegister, SimRequest,
     SimResponse, Vector2, Vector3, sim_referee,
 };
@@ -222,7 +222,7 @@ fn build_request(
     }
 }
 
-fn bot_state(robot: &crate::state::RobotState, team: TeamColor) -> SimBotState {
+fn bot_state(robot: &simhark::state::RobotState, team: TeamColor) -> SimBotState {
     SimBotState {
         bot_id: Some(BotId {
             id: robot.id as i32,
@@ -337,7 +337,7 @@ fn decode_action(
 
 fn decode_velocity_action(
     action: &SimBotAction,
-    robot: &crate::state::RobotState,
+    robot: &simhark::state::RobotState,
     mode_xy: DriveMode,
     mode_w: DriveMode,
 ) -> Option<MoveCommand> {
@@ -384,7 +384,7 @@ fn decode_velocity_action(
 
 fn decode_angular_velocity(
     action: &SimBotAction,
-    robot: &crate::state::RobotState,
+    robot: &simhark::state::RobotState,
     mode_w: DriveMode,
 ) -> Option<f64> {
     match mode_w {
@@ -470,7 +470,7 @@ fn robot_state(
     state: &WorldState,
     team: TeamColor,
     id: usize,
-) -> Option<&crate::state::RobotState> {
+) -> Option<&simhark::state::RobotState> {
     let robots = match team {
         TeamColor::Blue => &state.blue_robots,
         TeamColor::Yellow => &state.yellow_robots,
@@ -645,9 +645,9 @@ fn merge_actions_into_existing_world_command(
 }
 
 fn proto_team_to_local(value: i32) -> Option<TeamColor> {
-    match crate::proto::sumatra_sim_net::TeamColor::try_from(value).ok()? {
-        crate::proto::sumatra_sim_net::TeamColor::Yellow => Some(TeamColor::Yellow),
-        crate::proto::sumatra_sim_net::TeamColor::Blue => Some(TeamColor::Blue),
+    match crate::proto::TeamColor::try_from(value).ok()? {
+        crate::proto::TeamColor::Yellow => Some(TeamColor::Yellow),
+        crate::proto::TeamColor::Blue => Some(TeamColor::Blue),
     }
 }
 
@@ -757,7 +757,7 @@ mod tests {
             world_id: 0,
             sim_time: 1.0,
             frame: 1,
-            ball: crate::state::BallState {
+            ball: simhark::state::BallState {
                 x: 0.0,
                 y: 0.0,
                 z: 0.0,

@@ -1,11 +1,45 @@
 use std::env;
+use std::io::Result;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
-fn main() {
+fn main() -> Result<()> {
     println!("cargo:rerun-if-changed=build.rs");
     println!("cargo:rerun-if-env-changed=SIMHARK_SUMATRA_REPO_ROOT");
 
+    build_protos()?;
+    build_sumatra();
+    Ok(())
+}
+
+fn build_protos() -> Result<()> {
+    let proto_dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("proto");
+    let proto_files = [
+        "SimBotAction.proto",
+        "SimCommon.proto",
+        "SimReferee.proto",
+        "SimRegister.proto",
+        "SimRequest.proto",
+        "SimResponse.proto",
+        "SimState.proto",
+    ]
+    .map(|file| proto_dir.join(file));
+
+    let mut config = prost_build::Config::new();
+    config.extern_path(".google.protobuf.Any", "::prost_types::Any");
+    config.compile_protos(&proto_files, &[proto_dir])?;
+
+    println!("cargo:rerun-if-changed=proto/SimBotAction.proto");
+    println!("cargo:rerun-if-changed=proto/SimCommon.proto");
+    println!("cargo:rerun-if-changed=proto/SimReferee.proto");
+    println!("cargo:rerun-if-changed=proto/SimRegister.proto");
+    println!("cargo:rerun-if-changed=proto/SimRequest.proto");
+    println!("cargo:rerun-if-changed=proto/SimResponse.proto");
+    println!("cargo:rerun-if-changed=proto/SimState.proto");
+    Ok(())
+}
+
+fn build_sumatra() {
     let repo_root = default_sumatra_repo();
     println!(
         "cargo:rerun-if-changed={}",

@@ -2,8 +2,10 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use anyhow::Result;
-use simhark::{SimulationEngine, SumatraSimNetConfig, SumatraSimNetServer, WorldConfig};
-use simhark_sumatra::{SumatraInstance, SumatraLaunchConfig};
+use simhark::{SimulationEngine, WorldConfig};
+use simhark_sumatra::{
+    SumatraInstance, SumatraLaunchConfig, SumatraSimNetConfig, SumatraSimNetServer,
+};
 
 const WORLD_COUNT: usize = 2;
 const BASE_PORT: u16 = 14242;

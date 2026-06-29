@@ -4,17 +4,18 @@ use std::time::{Duration, Instant};
 use anyhow::Result;
 use referris::domain::{TrackedBall, TrackedRobot};
 use referris::{
-    AutoRef, Command, FieldGeometry, InputEnvelope, RawDetectionFrame, RefereeSnapshot, Team,
+    AutoRef, Command, FieldGeometry, InputEnvelope, RawDetectionFrame, RefereeSnapshot, Stage, Team,
     TeamInfo, TrackedFrame,
 };
 #[cfg(feature = "motion-audit")]
 use simhark::motion_audit::{MotionAuditor, robot_motion_summary};
 use simhark::viewer::{GameStateInfo, ViewerConfig, ViewerServer};
 use simhark::{
-    RobotState, SimulationEngine, SumatraSimNetConfig, SumatraSimNetServer, TeamColor,
-    TeleportBall, WorldCommand, WorldConfig, WorldState,
+    RobotState, SimulationEngine, TeamColor, TeleportBall, WorldCommand, WorldConfig, WorldState,
 };
-use simhark_sumatra::{SumatraInstance, SumatraLaunchConfig};
+use simhark_sumatra::{
+    SumatraInstance, SumatraLaunchConfig, SumatraSimNetConfig, SumatraSimNetServer,
+};
 
 const MOTION_LOG_EVERY_FRAMES: u64 = 15;
 const BALL_RECOVERY_IDLE_FRAMES: u64 = 20;
@@ -220,8 +221,11 @@ fn referris_input(state: &simhark::WorldState, config: &WorldConfig) -> InputEnv
         }),
         referee: Some(RefereeSnapshot {
             timestamp: state.sim_time,
+            stage: Stage::NormalFirstHalf,
+            stage_time_left: Some(0.0),
             command: Command::ForceStart,
             command_counter: state.frame as u32,
+            command_timestamp: state.sim_time,
             blue_on_positive_half: Some(false),
             next_command: None,
             current_action_time_remaining: None,
@@ -230,11 +234,23 @@ fn referris_input(state: &simhark::WorldState, config: &WorldConfig) -> InputEnv
                 name: "Yellow".into(),
                 goalkeeper: Some(0),
                 max_allowed_bots: Some(state.yellow_robots.len() as u32),
+                score: 0,
+                red_cards: 0,
+                yellow_cards: 0,
+                yellow_card_times: Vec::new(),
+                timeouts: 0,
+                timeout_time: 0.0,
             },
             blue: TeamInfo {
                 name: "Blue".into(),
                 goalkeeper: Some(0),
                 max_allowed_bots: Some(state.blue_robots.len() as u32),
+                score: 0,
+                red_cards: 0,
+                yellow_cards: 0,
+                yellow_card_times: Vec::new(),
+                timeouts: 0,
+                timeout_time: 0.0,
             },
         }),
         detections: Vec::<RawDetectionFrame>::new(),

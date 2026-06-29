@@ -7,6 +7,13 @@ use anyhow::{Context, Result, bail};
 use serde::{Deserialize, Serialize};
 use tempfile::TempDir;
 
+mod proto {
+    include!(concat!(env!("OUT_DIR"), "/edu.tigers.sumatra.sim.net.rs"));
+}
+mod sim_net;
+
+pub use sim_net::{SumatraSimNetConfig, SumatraSimNetServer};
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SumatraLaunchConfig {
     pub repo_root: PathBuf,

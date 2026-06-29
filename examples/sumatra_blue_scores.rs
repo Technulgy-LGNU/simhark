@@ -3,10 +3,11 @@ use std::time::{Duration, Instant};
 
 use anyhow::Result;
 use simhark::{
-    SimulationEngine, SumatraSimNetConfig, SumatraSimNetServer, TeamColor, TeleportBall,
-    TeleportRobot, WorldCommand, WorldConfig,
+    SimulationEngine, TeamColor, TeleportBall, TeleportRobot, WorldCommand, WorldConfig,
 };
-use simhark_sumatra::{SumatraInstance, SumatraLaunchConfig};
+use simhark_sumatra::{
+    SumatraInstance, SumatraLaunchConfig, SumatraSimNetConfig, SumatraSimNetServer,
+};
 
 fn main() -> Result<()> {
     // Match Sumatra remote client's static default geometry.

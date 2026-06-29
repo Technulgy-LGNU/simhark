@@ -10,13 +10,6 @@ fn main() -> Result<()> {
 
 fn build_protos() -> Result<()> {
     let proto_files = [
-        "proto/SimBotAction.proto",
-        "proto/SimCommon.proto",
-        "proto/SimReferee.proto",
-        "proto/SimRegister.proto",
-        "proto/SimRequest.proto",
-        "proto/SimResponse.proto",
-        "proto/SimState.proto",
         "proto/grSim_Commands.proto",
         "proto/grSim_Packet.proto",
         "proto/grSim_Replacement.proto",
