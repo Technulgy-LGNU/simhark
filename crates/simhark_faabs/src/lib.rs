@@ -2,6 +2,7 @@ mod conv;
 #[cfg(feature = "interface")]
 mod interface;
 mod run;
+pub mod synth;
 
 use crate::conv::world_state_to_cp_events;
 #[cfg(feature = "interface")]
@@ -15,12 +16,12 @@ use std::collections::HashMap;
 use std::mem;
 use std::net::Ipv4Addr;
 use tf_jetsoncode::Robot;
+use crate::synth::interface_command;
 
 pub struct Faabs<A: Ai = DummyAi> {
     pub robots: Vec<Robot<()>>,
     pub crash_pilot: CrashPilot<(), A>,
     pub feedback_robot: u32,
-    pub events: ::crashpilot::Events,
     pub team: TeamColor,
     pub events: crashpilot::Events,
     #[cfg(feature = "interface")]
@@ -86,6 +87,10 @@ impl<A: Ai + Default + Send> Faabs<A> {
             self.events.ws = self.interface.blocking_lock().clone();
         }
 
+        if self.events.ws.is_none() {
+            self.events.ws = Some(interface_command(self.team));
+        }
+
         let ws = self.events.ws.clone();
 
         let (interface, robots) = self.crash_pilot.step_with_data(mem::take(&mut self.events));
@@ -113,7 +118,7 @@ impl<A: Ai + Default + Send> Faabs<A> {
             run_sim_action(id, teensy, command, self.team);
 
             if self.feedback_robot == id {
-                self.events.rf = Some(conv::robot_cp(robot_cp));
+                self.events.rf = Some(robot_cp);
             }
         }
 

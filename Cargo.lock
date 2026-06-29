@@ -123,13 +123,10 @@ checksum = "7c02d123df017efcdfbd739ef81735b36c5ba83ec3c59c80a9d7ecc718f92e50"
 [[package]]
 name = "artificial_incompetence"
 version = "0.1.0"
-source = "git+https://github.com/Technulgy-LGNU/CrashPilot#34a10d939c95f3c2585bdffa0157fe9959df7028"
+source = "git+https://github.com/Technulgy-LGNU/CrashPilot#677cc7889367f71e9d77d8c67b91fc3d6be7dda3"
 dependencies = [
  "core_dump",
- "indicatif",
  "serde",
- "serde_json",
- "simhark 0.1.0 (git+https://github.com/Technulgy-LGNU/simhark)",
  "tch",
 ]
 
@@ -353,18 +350,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1d07550c9036bf2ae0c684c4297d503f838287c83c53686d05370d0e139ae570"
 
 [[package]]
-name = "console"
-version = "0.16.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d64e8af5551369d19cf50138de61f1c42074ab970f74e99be916646777f8fc87"
-dependencies = [
- "encode_unicode",
- "libc",
- "unicode-width",
- "windows-sys 0.61.2",
-]
-
-[[package]]
 name = "constant_time_eq"
 version = "0.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -373,7 +358,7 @@ checksum = "245097e9a4535ee1e3e3931fcfcd55a796a44c643e8596ff6566d68f09b87bbc"
 [[package]]
 name = "core_dump"
 version = "0.1.0"
-source = "git+https://github.com/Technulgy-LGNU/core-dump#0be7956db0832b22c7cee690e06cd9fbb3129bc6"
+source = "git+https://github.com/Technulgy-LGNU/core-dump#0da0b1cb1428d6e98a499edf00e5e062bc754b74"
 dependencies = [
  "num-traits",
  "prost 0.14.3",
@@ -402,7 +387,7 @@ dependencies = [
 [[package]]
 name = "crashpilot"
 version = "0.1.0"
-source = "git+https://github.com/Technulgy-LGNU/CrashPilot#34a10d939c95f3c2585bdffa0157fe9959df7028"
+source = "git+https://github.com/Technulgy-LGNU/CrashPilot#677cc7889367f71e9d77d8c67b91fc3d6be7dda3"
 dependencies = [
  "anyhow",
  "artificial_incompetence",
@@ -590,12 +575,6 @@ checksum = "eabffdaee24bd1bf95c5ef7cec31260444317e72ea56c4c91750e8b7ee58d5f1"
 dependencies = [
  "log",
 ]
-
-[[package]]
-name = "encode_unicode"
-version = "1.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "34aa73646ffb006b8f5147f3dc182bd4bcb190227ce861fc4a4844bf8e3cb2c0"
 
 [[package]]
 name = "env_filter"
@@ -1192,19 +1171,6 @@ dependencies = [
  "hashbrown 0.16.1",
  "serde",
  "serde_core",
-]
-
-[[package]]
-name = "indicatif"
-version = "0.18.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "25470f23803092da7d239834776d653104d551bc4d7eacaf31e6837854b8e9eb"
-dependencies = [
- "console",
- "portable-atomic",
- "unicode-width",
- "unit-prefix",
- "web-time",
 ]
 
 [[package]]
@@ -2398,6 +2364,7 @@ dependencies = [
  "serde",
  "serde_json",
  "simhark-sumatra",
+ "simhark_testing",
  "tiny_http",
  "tungstenite",
 ]
@@ -2405,7 +2372,7 @@ dependencies = [
 [[package]]
 name = "simhark"
 version = "0.1.0"
-source = "git+https://github.com/Technulgy-LGNU/simhark#0aada9209069b0d4f83273ae7d7d4c55f90b609b"
+source = "git+https://github.com/Technulgy-LGNU/simhark#0f1d8ad08df19ef2beef461f0c609a0cdecd585a"
 dependencies = [
  "crossbeam-channel",
  "env_logger",
@@ -2437,15 +2404,25 @@ dependencies = [
 name = "simhark_faabs"
 version = "0.1.0"
 dependencies = [
+ "core_dump",
  "crashpilot",
  "futures-util",
  "prost 0.14.3",
  "referris",
  "referris-simhark",
  "simhark 0.1.0",
+ "simhark_testing",
  "tf_jetsoncode",
  "tokio",
  "tokio-tungstenite",
+]
+
+[[package]]
+name = "simhark_testing"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "simhark 0.1.0",
 ]
 
 [[package]]
@@ -2565,7 +2542,7 @@ dependencies = [
 [[package]]
 name = "tf_jetsoncode"
 version = "0.1.0"
-source = "git+https://github.com/Technulgy-LGNU/teamfaabs-ssl-robot-code#a570f21ef97045c6c58d74b79b0d4514125a575c"
+source = "git+https://github.com/Technulgy-LGNU/teamfaabs-ssl-robot-code#2781ed9442fae26211e9b979601b4993eb0b7490"
 dependencies = [
  "anyhow",
  "core_dump",
@@ -2868,22 +2845,10 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e6e4313cd5fcd3dad5cafa179702e2b244f760991f45397d14d4ebf38247da75"
 
 [[package]]
-name = "unicode-width"
-version = "0.2.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b4ac048d71ede7ee76d585517add45da530660ef4390e49b098733c6e897f254"
-
-[[package]]
 name = "unicode-xid"
 version = "0.2.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ebc1c04c71510c7f702b52b7c350734c9ff1295c464a03335b00bb84fc54f853"
-
-[[package]]
-name = "unit-prefix"
-version = "0.5.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "81e544489bf3d8ef66c953931f56617f423cd4b5494be343d9b9d3dda037b9a3"
 
 [[package]]
 name = "untrusted"
@@ -3078,16 +3043,6 @@ name = "web-sys"
 version = "0.3.93"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "749466a37ee189057f54748b200186b59a03417a117267baf3fd89cecc9fb837"
-dependencies = [
- "js-sys",
- "wasm-bindgen",
-]
-
-[[package]]
-name = "web-time"
-version = "1.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5a6580f308b1fad9207618087a65c04e7a10bc77e02c8e84e9b00dd4b12fa0bb"
 dependencies = [
  "js-sys",
  "wasm-bindgen",

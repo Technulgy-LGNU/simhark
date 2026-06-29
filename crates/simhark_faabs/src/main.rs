@@ -1,6 +1,7 @@
 use referris::RefereeState;
 use simhark::{SimulationEngine, TeamColor, WorldCommand, WorldConfig};
 use simhark_faabs::Faabs;
+use core_dump::types::DummyAi;
 use std::thread;
 
 fn main() {
