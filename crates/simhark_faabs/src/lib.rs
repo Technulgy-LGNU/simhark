@@ -10,6 +10,7 @@ pub use crate::run::run_sim_action;
 use ::crashpilot::CrashPilot;
 use ::crashpilot::config::{LoggingConfig, RobotConfig, ServerConfig, SslConfig};
 use simhark::{WorldCommand, WorldState};
+use simhark::{TeamColor, WorldCommand, WorldState};
 use std::collections::HashMap;
 use std::mem;
 use std::net::Ipv4Addr;
@@ -35,7 +36,7 @@ impl Faabs {
 
         #[cfg(feature = "interface")]
         {
-            let cfg = get_config();
+            let cfg = get_config(num_robots);
             let tx = faabs.interface.clone();
             let ws_out = faabs.ws_out.clone();
 
@@ -61,7 +62,7 @@ impl Faabs {
 
         Self {
             robots,
-            crash_pilot: CrashPilot::new(get_config()),
+            crash_pilot: CrashPilot::new(get_config(num_robots)),
             feedback_robot: 0,
             events: ::crashpilot::Events::default(),
             team,
@@ -122,53 +123,20 @@ impl Faabs {
     }
 }
 
-fn get_config() -> ::crashpilot::Config {
+fn get_config(num_robots: u8) -> crashpilot::Config {
     let mut robots = HashMap::new();
 
-    robots.insert(
-        0,
-        RobotConfig {
-            ip: Ipv4Addr::new(10, 0, 64, 101),
-            substitution_pos: Default::default(),
-        },
-    );
-    robots.insert(
-        1,
-        RobotConfig {
-            ip: Ipv4Addr::new(10, 0, 64, 101),
-            substitution_pos: Default::default(),
-        },
-    );
-    robots.insert(
-        2,
-        RobotConfig {
-            ip: Ipv4Addr::new(10, 0, 64, 102),
-            substitution_pos: Default::default(),
-        },
-    );
-    robots.insert(
-        3,
-        RobotConfig {
-            ip: Ipv4Addr::new(10, 0, 64, 103),
-            substitution_pos: Default::default(),
-        },
-    );
-    robots.insert(
-        4,
-        RobotConfig {
-            ip: Ipv4Addr::new(10, 0, 64, 104),
-            substitution_pos: Default::default(),
-        },
-    );
-    robots.insert(
-        5,
-        RobotConfig {
-            ip: Ipv4Addr::new(10, 0, 64, 104),
-            substitution_pos: Default::default(),
-        },
-    );
+    for i in 0..num_robots as u32 {
+        robots.insert(
+            i,
+            RobotConfig {
+                ip: Ipv4Addr::new(10, 0, 64, 101 + i as u8),
+                substitution_pos: Default::default(),
+            },
+        );
+    }
 
-    ::crashpilot::Config {
+    crashpilot::Config {
         ssl: SslConfig::default(),
         server: ServerConfig::default(),
         logging: LoggingConfig::default(),
