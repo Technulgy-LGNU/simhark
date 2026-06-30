@@ -15,7 +15,7 @@
 
 use match_runner::controller::TeamKind;
 use match_runner::evaluator::MatchReport;
-use match_runner::{MatchConfig, run_match};
+use match_runner::{run_match, MatchConfig};
 use std::io::Write;
 
 struct Cfg {
@@ -56,9 +56,10 @@ fn parse() -> Cfg {
 }
 
 fn challenger(params: &Option<String>) -> TeamKind {
-  TeamKind::Bongka {
-    params: params.clone(),
+  if params.is_some() {
+    eprintln!("warning: --params is ignored for bangka challenger");
   }
+  TeamKind::Bangka
 }
 
 #[derive(Default)]

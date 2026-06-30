@@ -10,11 +10,13 @@ pub mod referris_autoref;
 #[cfg(feature = "sumatra")]
 pub mod sumatra_match;
 
-use controller::{TeamKind, build_controller};
+use controller::{build_controller, TeamKind};
 use director::MatchDirector;
 use evaluator::{Evaluator, MatchReport};
 use logio::GameLog;
-use simhark::{SimulationEngine, TeamColor, WorldConfig};
+use simhark::{
+    MoveCommand, RobotCommand, RobotState, SimulationEngine, TeamColor, WorldConfig, WorldState,
+};
 
 /// Everything needed to play one match.
 #[derive(Clone)]
@@ -31,6 +33,10 @@ pub struct MatchConfig {
   pub viewer: bool,
   /// Pace the simulation to ~60 Hz wall-clock (implied by `viewer`).
   pub realtime: bool,
+  /// Print simulator-level robot commands at a throttled interval.
+  pub print_commands: bool,
+  /// Frame interval for command printing.
+  pub print_commands_every: u64,
 }
 
 impl Default for MatchConfig {
@@ -46,6 +52,8 @@ impl Default for MatchConfig {
       quiet: false,
       viewer: false,
       realtime: false,
+      print_commands: false,
+      print_commands_every: 60,
     }
   }
 }
@@ -128,6 +136,7 @@ pub fn run_match(mc: &MatchConfig) -> MatchReport {
     let gc_yellow = director.command_for(TeamColor::Yellow);
     let blue_cmds = blue_ctrl.act(&state, &cfg, TeamColor::Blue, gc_blue);
     let yellow_cmds = yellow_ctrl.act(&state, &cfg, TeamColor::Yellow, gc_yellow);
+    maybe_print_commands(mc, state.sim_time, state.frame, &blue_cmds, &yellow_cmds);
 
     let mut wc = director.update(&state);
     if let Some(scorer) = director.take_goal() {
@@ -195,7 +204,7 @@ pub fn run_match(mc: &MatchConfig) -> MatchReport {
         let _ = log.write_frame(
           &new_state,
           director.score,
-          director.referee_command_code(),
+          referee_command_code,
           command_counter,
         );
       }
@@ -223,4 +232,66 @@ pub fn run_match(mc: &MatchConfig) -> MatchReport {
     let _ = log.close();
   }
   evaluator.finish(state.sim_time)
+}
+
+pub(crate) fn maybe_print_commands(
+  mc: &MatchConfig,
+  sim_time: f64,
+  frame: u64,
+  blue: &[RobotCommand],
+  yellow: &[RobotCommand],
+) {
+  if !mc.print_commands && std::env::var_os("MATCH_PRINT_COMMANDS").is_none() {
+    return;
+  }
+  let every = mc.print_commands_every.max(1);
+  if frame % every != 0 {
+    return;
+  }
+
+  eprintln!("[commands] t={sim_time:.2} frame={frame}");
+  print_team_commands("blue", blue);
+  print_team_commands("yellow", yellow);
+}
+
+#[derive(Default)]
+pub(crate) struct PickupValidator {
+  blue_slow_active: bool,
+  yellow_slow_active: bool,
+  blue_fast_active: bool,
+  yellow_fast_active: bool,
+  blue_warnings: u32,
+  yellow_warnings: u32,
+}
+
+impl PickupValidator {
+  pub(crate) fn maybe_validate(
+    &mut self,
+    mc: &MatchConfig,
+    state: &WorldState,
+    blue: &[RobotCommand],
+    yellow: &[RobotCommand],
+  ) {
+    if !mc.validate_pickup && std::env::var_os("MATCH_VALIDATE_PICKUP").is_none() {
+      return;
+    }
+
+    validate_pickup_for_team(
+      state,
+      TeamColor::Blue,
+      blue,
+      &mut self.blue_slow_active,
+      &mut self.blue_fast_active,
+      &mut self.blue_warnings,
+    );
+    validate_pickup_for_team(
+      state,
+      TeamColor::Yellow,
+      yellow,
+      &mut self.yellow_slow_active,
+      &mut self.yellow_fast_active,
+      &mut self.yellow_warnings,
+    );
+  }
+}
 }

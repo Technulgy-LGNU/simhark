@@ -23,7 +23,7 @@ use crate::controller::{build_controller, Controller, TeamKind};
 use crate::director::MatchDirector;
 use crate::evaluator::{Evaluator, MatchReport};
 use crate::logio::GameLog;
-use crate::{MatchConfig, world_config};
+use crate::{maybe_print_commands, world_config, MatchConfig, PickupValidator};
 
 /// How long to wait for the Sumatra JVM(s) to connect before giving up.
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(40);
@@ -176,6 +176,8 @@ fn try_run(mc: &MatchConfig) -> Result<MatchReport> {
       let gc = director.command_for(TeamColor::Yellow);
       wc.yellow = ctrl.act(&state, &cfg, TeamColor::Yellow, gc);
     }
+    maybe_print_commands(mc, state.sim_time, state.frame, &wc.blue, &wc.yellow);
+    pickup_validator.maybe_validate(mc, &state, &wc.blue, &wc.yellow);
 
     let new_state = match pop_state(server.step_with_local_commands(&mut engine, &[wc])?) {
       Some(s) => s,

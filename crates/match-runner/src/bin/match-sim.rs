@@ -9,7 +9,7 @@
 
 use match_runner::controller::TeamKind;
 use match_runner::evaluator::MatchReport;
-use match_runner::{MatchConfig, run_match};
+use match_runner::{run_match, MatchConfig};
 
 struct Args {
   mc: MatchConfig,
@@ -37,6 +37,11 @@ fn parse() -> Result<Args, String> {
       "--log" => log = Some(next()?),
       "--summary" => summary = Some(next()?),
       "--log-every" => mc.log_every = next()?.parse().map_err(|_| "bad --log-every")?,
+      "--print-commands" => mc.print_commands = true,
+      "--print-commands-every" => {
+        mc.print_commands_every = next()?.parse().map_err(|_| "bad --print-commands-every")?
+      }
+      "--validate-pickup" => mc.validate_pickup = true,
       "--viewer" => mc.viewer = true,
       "--realtime" => mc.realtime = true,
       "--quiet" => mc.quiet = true,
@@ -70,6 +75,9 @@ Options:\n\
   --log <path>      write SSL log file (Loguna-compatible)\n\
   --summary <path>  append one JSON summary line per run\n\
   --log-every <n>   log every n-th frame (default 2)\n\
+  --print-commands  print simulator robot commands to stderr\n\
+  --print-commands-every <n> frame interval for command printing (default 60)\n\
+  --validate-pickup warn if close slow pickup or fast predicted pickup is neglected\n\
   --viewer          open the live web viewer (build with --features viewer)\n\
   --realtime        pace the sim to ~60Hz wall-clock\n\
   --quiet           less stdout\n\

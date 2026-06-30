@@ -1,5 +1,5 @@
 use crashpilot::core_dump::proto::CpInfos;
-use simhark::{RobotState, WorldCommand, WorldConfig, WorldState};
+use simhark::{RobotState, TeamColor, WorldCommand, WorldConfig, WorldState};
 use simhark_faabs::run_sim_action;
 use simhark_testing::{
     BallInit, InitialWorld, RobotInit, SimTest, TeamCommands, TestCase, TestCli, TestOutcome,
@@ -215,7 +215,7 @@ impl SimTest for GoalieShotTest {
     fn drive(&mut self, state: &WorldState) -> TeamCommands {
         let (teensy, _) = self.goalie.step_with_data(goalie_events(state));
         let mut command = WorldCommand::default();
-        run_sim_action(GOALIE_ID as u32, teensy, &mut command);
+        run_sim_action(GOALIE_ID as u32, teensy, &mut command, TeamColor::Yellow);
 
         TeamCommands {
             blue: command.blue,
