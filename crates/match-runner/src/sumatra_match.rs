@@ -13,13 +13,13 @@
 
 use std::time::{Duration, Instant};
 
-use anyhow::{Context, Result};
-use simhark::{
-  SimulationEngine, SumatraSimNetConfig, SumatraSimNetServer, TeamColor, WorldCommand, WorldState,
+use anyhow::Context;
+use simhark::{SimulationEngine, TeamColor, WorldCommand, WorldState};
+use simhark_sumatra::{
+    SumatraInstance, SumatraLaunchConfig, SumatraSimNetConfig, SumatraSimNetServer,
 };
-use simhark_sumatra::{SumatraInstance, SumatraLaunchConfig};
 
-use crate::controller::{Controller, TeamKind, build_controller};
+use crate::controller::{build_controller, Controller, TeamKind};
 use crate::director::MatchDirector;
 use crate::evaluator::{Evaluator, MatchReport};
 use crate::logio::GameLog;
