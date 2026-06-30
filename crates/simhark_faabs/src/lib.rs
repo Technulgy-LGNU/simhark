@@ -74,7 +74,7 @@ impl<A: Ai + Send> Faabs<A> {
                     (),
                     ai,
                     RobotHeartbeat::default(),
-                    tokio::time::Instant::now(),
+                    std::time::Instant::now(),
                 ),
                 feedback_robot: 0,
                 team,
