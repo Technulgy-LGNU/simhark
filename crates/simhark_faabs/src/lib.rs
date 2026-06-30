@@ -15,6 +15,7 @@ use simhark::{TeamColor, WorldCommand, WorldState};
 use std::collections::HashMap;
 use std::mem;
 use std::net::Ipv4Addr;
+use crashpilot::communication::RobotHeartbeat;
 use tf_jetsoncode::Robot;
 use crate::synth::interface_command;
 
@@ -51,29 +52,42 @@ impl<A: Ai + Default + Send> Faabs<A> {
     }
 
     pub fn new(num_robots: u8, team: TeamColor) -> Self {
-        let mut robots = Vec::with_capacity(num_robots as usize);
-
-        for i in 0..num_robots {
-            let mut config = tf_jetsoncode::Config::default();
-            config.robot_id = i;
-
-            robots.push(Robot::new(config));
-        }
-
-        Self {
-            robots,
-            crash_pilot: CrashPilot::new(get_config(num_robots)),
-            feedback_robot: 0,
-            team,
-            events: crashpilot::Events::default(),
-            #[cfg(feature = "interface")]
-            interface: EventShare::default(),
-            #[cfg(feature = "interface")]
-            ws_out: crashpilot::communication::WebsocketOut::new(),
-        }
+        Self::with_ai(num_robots, team, A::default())
     }
+}
 
-    pub fn step(
+impl<A: Ai + Send> Faabs<A> {
+        pub fn with_ai(num_robots: u8, team: TeamColor, ai: A)    -> Self {
+            let mut robots = Vec::with_capacity(num_robots as usize);
+
+            for i in 0..num_robots {
+                let mut config = tf_jetsoncode::Config::default();
+                config.robot_id = i;
+
+                robots.push(Robot::new(config));
+            }
+
+            Self {
+                robots,
+                crash_pilot: CrashPilot::from_parts(
+                    get_config(num_robots),
+                    (),
+                    ai,
+                    RobotHeartbeat::default(),
+                    tokio::time::Instant::now(),
+                ),
+                feedback_robot: 0,
+                team,
+                events: crashpilot::Events::default(),
+                #[cfg(feature = "interface")]
+                interface: EventShare::default(),
+                #[cfg(feature = "interface")]
+                ws_out: crashpilot::communication::WebsocketOut::new(),
+            }
+        }
+
+
+        pub fn step(
         &mut self,
         state: &WorldState,
         command: &mut WorldCommand,
