@@ -2,11 +2,11 @@
 //! through the `simhark_faabs` binding (CrashPilot -> tf_jetsoncode firmware ->
 //! simhark). A controller just wraps a `Faabs<A>` for one team colour.
 
-use simhark::{RobotCommand, TeamColor, WorldCommand, WorldConfig, WorldState};
 use core_dump::proto::Referee;
 use core_dump::types::Ai;
-use simhark_faabs::Faabs;
+use simhark::{RobotCommand, TeamColor, WorldCommand, WorldConfig, WorldState};
 use simhark_faabs::synth::force_start_referee;
+use simhark_faabs::Faabs;
 
 /// Referee state resolved relative to a team, as decided by the match director.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -49,9 +49,7 @@ pub struct FaabsController<A: Ai> {
   name: String,
 }
 
-impl<A: Ai> Controller
-  for FaabsController<A>
-{
+impl<A: Ai + Send> Controller for FaabsController<A> {
   fn name(&self) -> &str {
     &self.name
   }
@@ -161,7 +159,9 @@ pub fn build_controller(kind: &TeamKind, color: TeamColor, num_robots: u8) -> Bo
       })
     }
     #[cfg(not(feature = "ungabunga"))]
-    TeamKind::Ungabunga { .. } => panic!("Ungabunga is disabled; build with `--features ungabunga` to enable"),
+    TeamKind::Ungabunga { .. } => {
+      panic!("Ungabunga is disabled; build with `--features ungabunga` to enable")
+    }
 
     #[cfg(feature = "ungabunga")]
     TeamKind::Ungabunga { params } => {
@@ -178,7 +178,9 @@ pub fn build_controller(kind: &TeamKind, color: TeamColor, num_robots: u8) -> Bo
     }
 
     #[cfg(not(feature = "ungabunga"))]
-    TeamKind::Bangka1 { .. } => panic!("Ungabunga is disabled; build with `--features ungabunga` to enable"),
+    TeamKind::Bangka1 { .. } => {
+      panic!("Ungabunga is disabled; build with `--features ungabunga` to enable")
+    }
 
     #[cfg(feature = "ungabunga")]
     TeamKind::Bangka1 => {
@@ -190,7 +192,9 @@ pub fn build_controller(kind: &TeamKind, color: TeamColor, num_robots: u8) -> Bo
     }
 
     #[cfg(not(feature = "ungabunga"))]
-    TeamKind::BangkaLegacy { .. } => panic!("Ungabunga is disabled; build with `--features ungabunga` to enable"),
+    TeamKind::BangkaLegacy { .. } => {
+      panic!("Ungabunga is disabled; build with `--features ungabunga` to enable")
+    }
 
     #[cfg(feature = "ungabunga")]
     TeamKind::BangkaLegacy => {
@@ -201,7 +205,9 @@ pub fn build_controller(kind: &TeamKind, color: TeamColor, num_robots: u8) -> Bo
       })
     }
     #[cfg(not(feature = "artificial_incompetence"))]
-    TeamKind::CrashPilot { .. } => panic!("CrashPilot is disabled; build with `--features artificial_incompetence` to enable"),
+    TeamKind::CrashPilot { .. } => {
+      panic!("CrashPilot is disabled; build with `--features artificial_incompetence` to enable")
+    }
     #[cfg(feature = "artificial_incompetence")]
     TeamKind::CrashPilot { model } => {
       let path = model

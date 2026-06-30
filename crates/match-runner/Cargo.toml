@@ -17,6 +17,7 @@ simhark_faabs = { path = "../simhark_faabs" }
 simhark-sumatra = { path = "../simhark-sumatra", optional = true }
 loguna = { git = "https://github.com/Technulgy-LGNU/loguna" }
 core_dump = { git = "https://github.com/Technulgy-LGNU/core-dump" }
+referris = { git = "https://github.com/Technulgy-LGNU/referris", default-features = false, optional = true }
 anyhow = "1.0"
 prost = "0.14"
 serde = { version = "1", features = ["derive"] }
@@ -36,3 +37,5 @@ ungabunga = ["dep:ungabunga"]
 artificial_incompetence = ["dep:artificial_incompetence"]
 viewer = ["simhark/viewer"]
 sumatra = ["dep:simhark-sumatra"]
+referris = ["dep:referris"]
+validator = ["referris"]

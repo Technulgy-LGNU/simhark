@@ -5,6 +5,8 @@ pub mod controller;
 pub mod director;
 pub mod evaluator;
 pub mod logio;
+#[cfg(feature = "referris")]
+pub mod referris_autoref;
 #[cfg(feature = "sumatra")]
 pub mod sumatra_match;
 
@@ -90,6 +92,9 @@ pub fn run_match(mc: &MatchConfig) -> MatchReport {
 
   let mut director = MatchDirector::new(cfg.clone(), mc.seconds);
   let mut evaluator = Evaluator::new(cfg.clone(), blue_name.clone(), yellow_name.clone());
+  #[cfg(feature = "referris")]
+  let mut referris = referris_autoref::ReferrisAutoref::new();
+  let mut pickup_validator = PickupValidator::default();
 
   let mut log = match &mc.log {
     Some(path) => GameLog::create(path, &cfg, &blue_name, &yellow_name).ok(),
@@ -140,6 +145,15 @@ pub fn run_match(mc: &MatchConfig) -> MatchReport {
     let new_state = engine.step_with_commands(&[wc]).remove(0);
     evaluator.tick(&new_state, Some(&state));
 
+    #[cfg(feature = "referris")]
+    let referris_tick = referris.step(
+      &new_state,
+      &cfg,
+      director.score,
+      director.referee_command_code(),
+      mc.quiet,
+    );
+
     if std::env::var("MATCH_DEBUG").is_ok() && new_state.frame % 120 == 0 {
       let bh = new_state.blue_robots.iter().filter(|r| r.infrared).count();
       let yh = new_state
@@ -172,6 +186,12 @@ pub fn run_match(mc: &MatchConfig) -> MatchReport {
 
     if let Some(log) = log.as_mut() {
       if new_state.frame % mc.log_every == 0 {
+        #[cfg(feature = "referris")]
+        let (referee_command_code, command_counter) =
+          (referris_tick.command_code, referris_tick.command_counter);
+        #[cfg(not(feature = "referris"))]
+        let (referee_command_code, command_counter) =
+          (director.referee_command_code(), command_counter);
         let _ = log.write_frame(
           &new_state,
           director.score,
@@ -182,6 +202,14 @@ pub fn run_match(mc: &MatchConfig) -> MatchReport {
     }
     #[cfg(feature = "viewer")]
     if let Some(v) = &viewer {
+      #[cfg(feature = "referris")]
+      v.set_game_state(simhark::viewer::GameStateInfo {
+        command: referris_tick.command_label.to_string(),
+        command_counter: referris_tick.command_counter,
+        stage: None,
+        blue_name: Some(blue_name.clone()),
+        yellow_name: Some(yellow_name.clone()),
+      });
       v.publish(&new_state);
     }
     if pace {

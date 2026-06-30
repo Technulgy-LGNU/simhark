@@ -123,6 +123,9 @@ fn try_run(mc: &MatchConfig) -> Result<MatchReport> {
 
   let mut director = MatchDirector::new(cfg.clone(), mc.seconds);
   let mut evaluator = Evaluator::new(cfg.clone(), blue_name.clone(), yellow_name.clone());
+  #[cfg(feature = "referris")]
+  let mut referris = crate::referris_autoref::ReferrisAutoref::new();
+  let mut pickup_validator = PickupValidator::default();
 
   let mut log = match &mc.log {
     Some(path) => GameLog::create(path, &cfg, &blue_name, &yellow_name).ok(),
@@ -180,18 +183,41 @@ fn try_run(mc: &MatchConfig) -> Result<MatchReport> {
     };
     evaluator.tick(&new_state, Some(&state));
 
+    #[cfg(feature = "referris")]
+    let referris_tick = referris.step(
+      &new_state,
+      &cfg,
+      director.score,
+      director.referee_command_code(),
+      mc.quiet,
+    );
+
     if let Some(log) = log.as_mut() {
       if new_state.frame % mc.log_every == 0 {
+        #[cfg(feature = "referris")]
+        let (referee_command_code, command_counter) =
+          (referris_tick.command_code, referris_tick.command_counter);
+        #[cfg(not(feature = "referris"))]
+        let (referee_command_code, command_counter) =
+          (director.referee_command_code(), command_counter);
         let _ = log.write_frame(
           &new_state,
           director.score,
-          director.referee_command_code(),
+          referee_command_code,
           command_counter,
         );
       }
     }
     #[cfg(feature = "viewer")]
     if let Some(v) = &viewer {
+      #[cfg(feature = "referris")]
+      v.set_game_state(simhark::viewer::GameStateInfo {
+        command: referris_tick.command_label.to_string(),
+        command_counter: referris_tick.command_counter,
+        stage: None,
+        blue_name: Some(blue_name.clone()),
+        yellow_name: Some(yellow_name.clone()),
+      });
       v.publish(&new_state);
     }
 
