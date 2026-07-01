@@ -15,7 +15,7 @@
 
 use match_runner::controller::TeamKind;
 use match_runner::evaluator::MatchReport;
-use match_runner::{run_match, MatchConfig};
+use match_runner::{MatchConfig, run_match};
 use std::io::Write;
 
 struct Cfg {

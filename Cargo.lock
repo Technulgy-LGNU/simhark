@@ -123,7 +123,6 @@ checksum = "7c02d123df017efcdfbd739ef81735b36c5ba83ec3c59c80a9d7ecc718f92e50"
 [[package]]
 name = "artificial_incompetence"
 version = "0.1.0"
-source = "git+https://github.com/Technulgy-LGNU/CrashPilot#677cc7889367f71e9d77d8c67b91fc3d6be7dda3"
 dependencies = [
  "core_dump",
  "serde",
@@ -147,6 +146,13 @@ name = "autocfg"
 version = "1.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c08606f8c3cbf4ce6ec8e28fb0014a2c086708fe954eaa885384a6165172e7e8"
+
+[[package]]
+name = "bangka"
+version = "0.1.0"
+dependencies = [
+ "core_dump",
+]
 
 [[package]]
 name = "base64"
@@ -188,6 +194,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cdeb9d870516001442e364c5220d3574d2da8dc765554b4a617230d33fa58ef5"
 dependencies = [
  "objc2",
+]
+
+[[package]]
+name = "bongka"
+version = "0.1.0"
+dependencies = [
+ "core_dump",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]
@@ -358,11 +373,10 @@ checksum = "245097e9a4535ee1e3e3931fcfcd55a796a44c643e8596ff6566d68f09b87bbc"
 [[package]]
 name = "core_dump"
 version = "0.1.0"
-source = "git+https://github.com/Technulgy-LGNU/core-dump#0da0b1cb1428d6e98a499edf00e5e062bc754b74"
 dependencies = [
  "num-traits",
- "prost 0.14.3",
- "prost-types 0.14.3",
+ "prost 0.14.4",
+ "prost-types 0.14.4",
  "serde",
 ]
 
@@ -387,7 +401,6 @@ dependencies = [
 [[package]]
 name = "crashpilot"
 version = "0.1.0"
-source = "git+https://github.com/Technulgy-LGNU/CrashPilot#677cc7889367f71e9d77d8c67b91fc3d6be7dda3"
 dependencies = [
  "anyhow",
  "artificial_incompetence",
@@ -396,7 +409,7 @@ dependencies = [
  "http-body-util",
  "hyper",
  "hyper-util",
- "prost 0.14.3",
+ "prost 0.14.4",
  "serde",
  "serde_json",
  "tokio",
@@ -1301,13 +1314,33 @@ checksum = "5e5032e24019045c762d3c0f28f5b6b8bbf38563a65908389bf7978758920897"
 [[package]]
 name = "loguna"
 version = "0.1.0"
-source = "git+https://github.com/Technulgy-LGNU/loguna#35dbc333412512c053b2f3711d2cf5ab0d9580ef"
 dependencies = [
  "byteorder",
  "flate2",
- "prost 0.14.3",
- "prost-build 0.14.3",
+ "prost 0.14.4",
+ "prost-build 0.14.4",
  "thiserror 2.0.18",
+]
+
+[[package]]
+name = "match-runner"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "artificial_incompetence",
+ "bangka",
+ "bongka",
+ "core_dump",
+ "loguna",
+ "prost 0.14.4",
+ "referris",
+ "serde",
+ "serde_json",
+ "simhark",
+ "simhark-sumatra",
+ "simhark_faabs",
+ "tokio",
+ "ungabunga",
 ]
 
 [[package]]
@@ -1788,12 +1821,12 @@ dependencies = [
 
 [[package]]
 name = "prost"
-version = "0.14.3"
+version = "0.14.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d2ea70524a2f82d518bce41317d0fae74151505651af45faf1ffbd6fd33f0568"
+checksum = "528ac67416ff8646872a3c02cad9cc4ee5dc9f9540c9b10771855c95cb2e5ae1"
 dependencies = [
  "bytes",
- "prost-derive 0.14.3",
+ "prost-derive 0.14.4",
 ]
 
 [[package]]
@@ -1818,9 +1851,9 @@ dependencies = [
 
 [[package]]
 name = "prost-build"
-version = "0.14.3"
+version = "0.14.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "343d3bd7056eda839b03204e68deff7d1b13aba7af2b2fd16890697274262ee7"
+checksum = "03da047801ff44bb6a4d407d4860c05fd70bb81714e6b2f3812603d5b145b042"
 dependencies = [
  "heck",
  "itertools",
@@ -1828,8 +1861,8 @@ dependencies = [
  "multimap",
  "petgraph 0.8.3",
  "prettyplease",
- "prost 0.14.3",
- "prost-types 0.14.3",
+ "prost 0.14.4",
+ "prost-types 0.14.4",
  "regex",
  "syn",
  "tempfile",
@@ -1850,9 +1883,9 @@ dependencies = [
 
 [[package]]
 name = "prost-derive"
-version = "0.14.3"
+version = "0.14.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "27c6023962132f4b30eb4c172c91ce92d933da334c59c23cddee82358ddafb0b"
+checksum = "b570b25f7617e43d59005d0990ccb79e950a423952cea19671b7a876da390adf"
 dependencies = [
  "anyhow",
  "itertools",
@@ -1872,11 +1905,11 @@ dependencies = [
 
 [[package]]
 name = "prost-types"
-version = "0.14.3"
+version = "0.14.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8991c4cbdb8bc5b11f0b074ffe286c30e523de90fee5ba8132f1399f23cb3dd7"
+checksum = "f94967dc7688f3054c7fac87473ffae4cc4c3904800e2d9f5b857246d8963b0a"
 dependencies = [
- "prost 0.14.3",
+ "prost 0.14.4",
 ]
 
 [[package]]
@@ -2051,14 +2084,13 @@ dependencies = [
 [[package]]
 name = "referris"
 version = "0.1.0"
-source = "git+https://github.com/Technulgy-LGNU/referris#c24e545c2e6b6f62cebd0c910868eb2a5bbf9c4e"
 dependencies = [
  "core_dump",
  "loguna",
- "prost 0.14.3",
+ "prost 0.14.4",
  "serde",
  "serde_json",
- "simhark 0.1.0 (git+https://github.com/Technulgy-LGNU/simhark)",
+ "simhark",
  "socket2 0.5.10",
  "thiserror 2.0.18",
 ]
@@ -2066,10 +2098,9 @@ dependencies = [
 [[package]]
 name = "referris-simhark"
 version = "0.1.0"
-source = "git+https://github.com/Technulgy-LGNU/referris#c24e545c2e6b6f62cebd0c910868eb2a5bbf9c4e"
 dependencies = [
  "referris",
- "simhark 0.1.0 (git+https://github.com/Technulgy-LGNU/simhark)",
+ "simhark",
 ]
 
 [[package]]
@@ -2353,9 +2384,9 @@ dependencies = [
  "log",
  "nalgebra",
  "parking_lot",
- "prost 0.14.3",
+ "prost 0.14.4",
  "prost-build 0.13.5",
- "prost-types 0.14.3",
+ "prost-types 0.14.4",
  "rand 0.10.0",
  "rand_chacha 0.10.0",
  "rapier3d",
@@ -2370,33 +2401,14 @@ dependencies = [
 ]
 
 [[package]]
-name = "simhark"
-version = "0.1.0"
-source = "git+https://github.com/Technulgy-LGNU/simhark#0f1d8ad08df19ef2beef461f0c609a0cdecd585a"
-dependencies = [
- "crossbeam-channel",
- "env_logger",
- "log",
- "nalgebra",
- "parking_lot",
- "prost 0.14.3",
- "prost-build 0.13.5",
- "prost-types 0.14.3",
- "rand 0.10.0",
- "rand_chacha 0.10.0",
- "rapier3d",
- "rayon",
- "serde",
- "serde_json",
-]
-
-[[package]]
 name = "simhark-sumatra"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "prost 0.14.4",
+ "prost-build 0.14.4",
  "serde",
- "simhark 0.1.0",
+ "simhark",
  "tempfile",
 ]
 
@@ -2407,10 +2419,10 @@ dependencies = [
  "core_dump",
  "crashpilot",
  "futures-util",
- "prost 0.14.3",
+ "prost 0.14.4",
  "referris",
  "referris-simhark",
- "simhark 0.1.0",
+ "simhark",
  "simhark_testing",
  "tf_jetsoncode",
  "tokio",
@@ -2422,7 +2434,7 @@ name = "simhark_testing"
 version = "0.1.0"
 dependencies = [
  "serde",
- "simhark 0.1.0",
+ "simhark",
 ]
 
 [[package]]
@@ -2542,12 +2554,11 @@ dependencies = [
 [[package]]
 name = "tf_jetsoncode"
 version = "0.1.0"
-source = "git+https://github.com/Technulgy-LGNU/teamfaabs-ssl-robot-code#2781ed9442fae26211e9b979601b4993eb0b7490"
 dependencies = [
  "anyhow",
  "core_dump",
  "hidapi",
- "prost 0.14.3",
+ "prost 0.14.4",
  "serde",
  "tokio",
  "toml",
@@ -2837,6 +2848,15 @@ name = "typenum"
 version = "1.19.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "562d481066bde0658276a35467c4af00bdc6ee726305698a55b86e61d7ad82bb"
+
+[[package]]
+name = "ungabunga"
+version = "0.1.0"
+dependencies = [
+ "core_dump",
+ "serde",
+ "serde_json",
+]
 
 [[package]]
 name = "unicode-ident"

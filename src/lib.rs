@@ -42,7 +42,7 @@ pub mod world;
 
 // Re-export main types
 pub use command::{
-    MoveCommand, RobotCommand, TeamCommand, TeleportBall, TeleportRobot, WorldCommand,
+  MoveCommand, RobotCommand, TeamCommand, TeleportBall, TeleportRobot, WorldCommand,
 };
 pub use config::{BallConfig, FieldConfig, RobotConfig, WorldConfig};
 pub use controller::{ControlledTeams, FnTeamController, NoopController, TeamController};
