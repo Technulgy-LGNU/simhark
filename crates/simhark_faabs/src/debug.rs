@@ -345,6 +345,7 @@ fn ai_task_label(command: AiRobotCommand) -> String {
     AiRobotCommand::PosSpeed(_, _) => "AI PosSpeed",
     AiRobotCommand::PosFace(_, _) => "AI PosFace",
     AiRobotCommand::PosFaceSpeed(_, _, _) => "AI PosFaceSpeed",
+    AiRobotCommand::WallPos(_, _) => "AI WallPos",
     AiRobotCommand::Kick(_) => "AI Kick",
     AiRobotCommand::Chip(_) => "AI Chip",
     AiRobotCommand::RecKick(_) => "AI RecKick",
@@ -374,6 +375,7 @@ fn ai_command_detail(command: AiRobotCommand) -> String {
         norm_pos(pos)
       )
     }
+    AiRobotCommand::WallPos(pos, orient) => format!("WallPos {} face={orient}deg", norm_pos(pos)),
     AiRobotCommand::Kick(orient) => format!("Kick orient={orient:.0}deg"),
     AiRobotCommand::Chip(orient) => format!("Chip orient={orient:.0}deg"),
     AiRobotCommand::RecKick(power) => format!("RecKick power={power:.2}"),
@@ -400,7 +402,8 @@ fn ai_task_color(command: AiRobotCommand) -> String {
     AiRobotCommand::Pos(_)
     | AiRobotCommand::PosSpeed(_, _)
     | AiRobotCommand::PosFace(_, _)
-    | AiRobotCommand::PosFaceSpeed(_, _, _) => "#38bdf8",
+    | AiRobotCommand::PosFaceSpeed(_, _, _)
+    | AiRobotCommand::WallPos(_, _) => "#38bdf8",
     AiRobotCommand::Kick(_) | AiRobotCommand::KickGoal => "#ef4444",
     AiRobotCommand::Chip(_) => "#f97316",
     AiRobotCommand::RecKick(_) | AiRobotCommand::RecPass => "#22c55e",
