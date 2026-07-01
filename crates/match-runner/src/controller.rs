@@ -4,9 +4,9 @@
 
 use core_dump::proto::Referee;
 use core_dump::types::Ai;
-use simhark::{RobotCommand, TeamColor, WorldCommand, WorldConfig, WorldState};
-use simhark_faabs::synth::force_start_referee;
+use simhark::{MoveCommand, RobotCommand, TeamColor, WorldCommand, WorldConfig, WorldState};
 use simhark_faabs::Faabs;
+use simhark_faabs::synth::force_start_referee;
 
 /// Referee state resolved relative to a team, as decided by the match director.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -70,6 +70,35 @@ impl<A: Ai + Send> Controller for FaabsController<A> {
   }
 }
 
+/// Controller that keeps every robot in a zero-drive idle state.
+pub struct DummyController {
+  num_robots: u8,
+}
+
+impl Controller for DummyController {
+  fn name(&self) -> &str {
+    "dummy"
+  }
+
+  fn act(
+    &mut self,
+    _state: &WorldState,
+    _cfg: &WorldConfig,
+    _color: TeamColor,
+    _gc: GameCommand,
+  ) -> Vec<RobotCommand> {
+    (0..self.num_robots as usize)
+      .map(|id| RobotCommand {
+        id,
+        move_command: Some(MoveCommand::WheelVelocity([0.0; 4])),
+        kick_speed: 0.0,
+        kick_angle: 0.0,
+        dribbler_on: false,
+      })
+      .collect()
+  }
+}
+
 /// Identifies which AI a side should use.
 #[derive(Debug, Clone)]
 pub enum TeamKind {
@@ -87,6 +116,8 @@ pub enum TeamKind {
   BangkaLegacy,
   /// CrashPilot's machine-learning AI.
   CrashPilot { model: Option<String> },
+  /// No-op side: keeps robots idle with zero wheel velocity.
+  Dummy,
   /// The real Sumatra (external Java AI), driven over the SimNet protocol.
   /// This side is *not* a faabs controller; `run_match` handles it specially.
   Sumatra,
@@ -105,6 +136,7 @@ impl TeamKind {
       "bangka1" => Ok(TeamKind::Bangka1),
       "legacy" | "bangka0" | "baseline" => Ok(TeamKind::BangkaLegacy),
       "crashpilot" | "cp" | "ml" | "ai" => Ok(TeamKind::CrashPilot { model: arg }),
+      "dummy" | "noop" | "none" | "idle" => Ok(TeamKind::Dummy),
       "sumatra" | "real" | "tigers" => Ok(TeamKind::Sumatra),
       other => Err(format!("unknown team kind: {other}")),
     }
@@ -118,6 +150,7 @@ impl TeamKind {
       TeamKind::Bangka1 => "bangka1",
       TeamKind::BangkaLegacy => "legacy",
       TeamKind::CrashPilot { .. } => "crashpilot",
+      TeamKind::Dummy => "dummy",
       TeamKind::Sumatra => "sumatra",
     }
   }
@@ -127,12 +160,19 @@ impl TeamKind {
   pub fn is_external(&self) -> bool {
     matches!(self, TeamKind::Sumatra)
   }
+
+  /// True for in-process sides that go through CrashPilot/faabs and therefore
+  /// inherit CrashPilot's current robot-count limit.
+  pub fn uses_crashpilot_binding(&self) -> bool {
+    !matches!(self, TeamKind::Dummy | TeamKind::Sumatra)
+  }
 }
 
 /// Build a faabs controller for an in-process side. Panics for external kinds
 /// (e.g. [`TeamKind::Sumatra`]); `run_match` must route those separately.
 pub fn build_controller(kind: &TeamKind, color: TeamColor, num_robots: u8) -> Box<dyn Controller> {
   match kind {
+    TeamKind::Dummy => Box::new(DummyController { num_robots }),
     #[cfg(not(feature = "bangka"))]
     TeamKind::Bangka => panic!("Bangka is disabled; build with `--features bangka` to enable"),
     #[cfg(feature = "bangka")]
@@ -224,6 +264,58 @@ pub fn build_controller(kind: &TeamKind, color: TeamColor, num_robots: u8) -> Bo
     }
     TeamKind::Sumatra => {
       unreachable!("Sumatra is external; run_match drives it over SimNet")
+    }
+  }
+}
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+
+  #[test]
+  fn dummy_aliases_parse_to_dummy() {
+    for name in ["dummy", "noop", "none", "idle"] {
+      assert!(matches!(TeamKind::parse(name), Ok(TeamKind::Dummy)));
+    }
+  }
+
+  #[test]
+  fn dummy_controller_sends_zero_wheel_commands_for_every_robot() {
+    let mut controller = build_controller(&TeamKind::Dummy, TeamColor::Blue, 3);
+    let state = WorldState {
+      world_id: 0,
+      sim_time: 0.0,
+      frame: 0,
+      ball: simhark::BallState {
+        x: 0.0,
+        y: 0.0,
+        z: 0.0,
+        vx: 0.0,
+        vy: 0.0,
+        vz: 0.0,
+      },
+      blue_robots: Vec::new(),
+      yellow_robots: Vec::new(),
+      goal_blue: false,
+      goal_yellow: false,
+    };
+    let commands = controller.act(
+      &state,
+      &WorldConfig::division_b(),
+      TeamColor::Blue,
+      GameCommand::Running,
+    );
+
+    assert_eq!(commands.len(), 3);
+    for (id, command) in commands.iter().enumerate() {
+      assert_eq!(command.id, id);
+      assert!(matches!(
+        command.move_command,
+        Some(MoveCommand::WheelVelocity([0.0, 0.0, 0.0, 0.0]))
+      ));
+      assert_eq!(command.kick_speed, 0.0);
+      assert_eq!(command.kick_angle, 0.0);
+      assert!(!command.dribbler_on);
     }
   }
 }

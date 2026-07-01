@@ -9,7 +9,8 @@
 
 use match_runner::controller::TeamKind;
 use match_runner::evaluator::MatchReport;
-use match_runner::{run_match, MatchConfig};
+use match_runner::{MatchConfig, run_match};
+use simhark::config::MAX_ROBOTS_PER_TEAM;
 
 struct Args {
   mc: MatchConfig,
@@ -30,6 +31,8 @@ fn parse() -> Result<Args, String> {
     match a.as_str() {
       "--blue" => mc.blue = TeamKind::parse(&next()?)?,
       "--yellow" => mc.yellow = TeamKind::parse(&next()?)?,
+      "--blue-bots" => mc.blue_bots = Some(parse_bots(&next()?, "--blue-bots")?),
+      "--yellow-bots" => mc.yellow_bots = Some(parse_bots(&next()?, "--yellow-bots")?),
       "--seconds" => mc.seconds = next()?.parse().map_err(|_| "bad --seconds")?,
       "--div" => mc.div = next()?.chars().next().unwrap_or('b'),
       "--seed" => mc.seed = next()?.parse().map_err(|_| "bad --seed")?,
@@ -61,6 +64,16 @@ fn parse() -> Result<Args, String> {
   })
 }
 
+fn parse_bots(value: &str, flag: &str) -> Result<usize, String> {
+  let bots = value.parse().map_err(|_| format!("bad {flag}"))?;
+  if bots > MAX_ROBOTS_PER_TEAM {
+    return Err(format!(
+      "{flag} must be <= {MAX_ROBOTS_PER_TEAM}, got {bots}"
+    ));
+  }
+  Ok(bots)
+}
+
 fn print_help() {
   println!(
     "match-sim — AI vs AI RoboCup SSL match in simhark\n\
@@ -68,6 +81,8 @@ fn print_help() {
 Options:\n\
   --blue   <kind>   team controlling blue   (default bangka)\n\
   --yellow <kind>   team controlling yellow (default bangka)\n\
+  --blue-bots <n>   blue AI robot count; 0 disables blue AI (default from --div)\n\
+  --yellow-bots <n> yellow AI robot count; 0 disables yellow AI (default from --div)\n\
   --seconds <f>     match length in sim seconds (default 60)\n\
   --div <a|b>       division / field+robot count (default b)\n\
   --seed <u>        RNG seed (default 1)\n\
@@ -82,9 +97,10 @@ Options:\n\
   --realtime        pace the sim to ~60Hz wall-clock\n\
   --quiet           less stdout\n\
 \n\
-Team kinds: bangka | bongka[:params.json] | ungabunga[:params.json] | crashpilot[:model.safetensors] | sumatra (real, external JVM)\n\
+Team kinds: bangka | bongka[:params.json] | ungabunga[:params.json] | crashpilot[:model.safetensors] | dummy | sumatra (real, external JVM)\n\
 \n\
 'crashpilot' defaults to /run/media/shark/data/dev/robocup/ai/crashpilot.safetensors.\n\
+'dummy' keeps that team's robots idle with zero wheel velocity.\n\
 'sumatra' launches the real Sumatra over SimNet and runs in real time. Use\n\
 --div b: the in-process AI (CrashPilot) supports at most 8 robots/team."
   );

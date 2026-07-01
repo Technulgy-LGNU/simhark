@@ -42,10 +42,13 @@ pub struct MatchDirector {
   last_goal: Option<TeamColor>,
   duration: f64,
   prepare_time: f64,
+  blue_bots: usize,
+  yellow_bots: usize,
 }
 
 impl MatchDirector {
   pub fn new(cfg: WorldConfig, duration_secs: f64) -> Self {
+    let robots_per_team = cfg.robots_per_team;
     Self {
       cfg,
       phase: Phase::Prepare {
@@ -61,7 +64,15 @@ impl MatchDirector {
       last_goal: None,
       duration: duration_secs,
       prepare_time: 0.8,
+      blue_bots: robots_per_team,
+      yellow_bots: robots_per_team,
     }
+  }
+
+  pub fn with_bot_counts(mut self, blue_bots: usize, yellow_bots: usize) -> Self {
+    self.blue_bots = blue_bots.min(self.cfg.robots_per_team);
+    self.yellow_bots = yellow_bots.min(self.cfg.robots_per_team);
+    self
   }
 
   pub fn is_over(&self, state: &WorldState) -> bool {
@@ -132,7 +143,7 @@ impl MatchDirector {
         scorer, self.score.blue, self.score.yellow
       ));
       self.last_goal = Some(scorer);
-      self.reset_for_kickoff(state.sim_time, kick, &mut cmd);
+      self.reset_for_kickoff(state.sim_time, self.active_kickoff_team(kick), &mut cmd);
     } else if !goal {
       self.goal_latched = false;
     }
@@ -200,17 +211,39 @@ impl MatchDirector {
       vy: Some(0.0),
       vz: Some(0.0),
     });
-    cmd.teleport_robots = formation(&self.cfg, TeamColor::Blue)
+    cmd.teleport_robots = formation(&self.cfg, TeamColor::Blue, self.blue_bots)
       .into_iter()
-      .chain(formation(&self.cfg, TeamColor::Yellow))
+      .chain(formation(&self.cfg, TeamColor::Yellow, self.yellow_bots))
+      .chain(disabled_robots(&self.cfg, TeamColor::Blue, self.blue_bots))
+      .chain(disabled_robots(
+        &self.cfg,
+        TeamColor::Yellow,
+        self.yellow_bots,
+      ))
       .collect();
   }
 
   /// Place everyone for the opening kickoff.
   pub fn kickoff_reset(&mut self) -> WorldCommand {
     let mut cmd = WorldCommand::default();
-    self.reset_for_kickoff(0.0, TeamColor::Blue, &mut cmd);
+    self.reset_for_kickoff(0.0, self.active_kickoff_team(TeamColor::Blue), &mut cmd);
     cmd
+  }
+
+  fn active_kickoff_team(&self, preferred: TeamColor) -> TeamColor {
+    let preferred_bots = match preferred {
+      TeamColor::Blue => self.blue_bots,
+      TeamColor::Yellow => self.yellow_bots,
+    };
+    if preferred_bots > 0 {
+      return preferred;
+    }
+
+    match preferred {
+      TeamColor::Blue if self.yellow_bots > 0 => TeamColor::Yellow,
+      TeamColor::Yellow if self.blue_bots > 0 => TeamColor::Blue,
+      _ => preferred,
+    }
   }
 
   fn ball_stuck(&self, state: &WorldState) -> bool {
@@ -253,8 +286,7 @@ fn jitter(seed: u64, id: usize, axis: u64) -> f64 {
 /// jittered by `cfg.seed` so the (otherwise fully deterministic) sim explores
 /// different opening states across seeds — making the mirrored bench a real
 /// multi-sample A/B instead of one scenario counted N times.
-fn formation(cfg: &WorldConfig, color: TeamColor) -> Vec<TeleportRobot> {
-  let n = cfg.robots_per_team;
+fn formation(cfg: &WorldConfig, color: TeamColor, n: usize) -> Vec<TeleportRobot> {
   let l = cfg.field.field_length * 0.5;
   let w = cfg.field.field_width * 0.5;
   let seed = cfg.seed;
@@ -298,4 +330,22 @@ fn formation(cfg: &WorldConfig, color: TeamColor) -> Vec<TeleportRobot> {
     });
   }
   robots
+}
+
+fn disabled_robots(
+  cfg: &WorldConfig,
+  color: TeamColor,
+  first_disabled: usize,
+) -> impl Iterator<Item = TeleportRobot> + '_ {
+  (first_disabled..cfg.robots_per_team).map(move |id| TeleportRobot {
+    id,
+    team: color,
+    x: None,
+    y: None,
+    orientation: None,
+    vx: Some(0.0),
+    vy: Some(0.0),
+    v_angular: Some(0.0),
+    present: Some(false),
+  })
 }

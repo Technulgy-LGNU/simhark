@@ -13,17 +13,17 @@
 
 use std::time::{Duration, Instant};
 
-use anyhow::Context;
+use anyhow::{Context, Result};
 use simhark::{SimulationEngine, TeamColor, WorldCommand, WorldState};
 use simhark_sumatra::{
-    SumatraInstance, SumatraLaunchConfig, SumatraSimNetConfig, SumatraSimNetServer,
+  SumatraInstance, SumatraLaunchConfig, SumatraSimNetConfig, SumatraSimNetServer,
 };
 
-use crate::controller::{build_controller, Controller, TeamKind};
+use crate::controller::{Controller, TeamKind, build_controller};
 use crate::director::MatchDirector;
 use crate::evaluator::{Evaluator, MatchReport};
 use crate::logio::GameLog;
-use crate::{maybe_print_commands, world_config, MatchConfig, PickupValidator};
+use crate::{MatchConfig, PickupValidator, maybe_print_commands, world_config};
 
 /// How long to wait for the Sumatra JVM(s) to connect before giving up.
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(40);
@@ -49,37 +49,51 @@ pub fn run(mc: &MatchConfig) -> MatchReport {
 }
 
 fn try_run(mc: &MatchConfig) -> Result<MatchReport> {
-  let cfg = world_config(mc.div, mc.seed);
-  let n = cfg.robots_per_team as u8;
+  let mut cfg = world_config(mc.div, mc.seed);
+  let default_bots = cfg.robots_per_team;
+  let bots = mc.bot_counts(default_bots);
+  let physical_bots = mc.physical_bot_counts(default_bots);
+  cfg.robots_per_team = physical_bots.blue.max(physical_bots.yellow);
 
   // Any in-process side runs through CrashPilot, whose GameState holds at most
   // 8 robots per team. Division A has 11, so reject it with a clear message
   // rather than letting CrashPilot panic on an out-of-bounds robot id.
-  let has_in_process = !mc.blue.is_external() || !mc.yellow.is_external();
-  if has_in_process && n > 8 {
+  let has_crashpilot_bound_side = (bots.blue > 0 && mc.blue.uses_crashpilot_binding())
+    || (bots.yellow > 0 && mc.yellow.uses_crashpilot_binding());
+  if has_crashpilot_bound_side && bots.blue.max(bots.yellow) > 8 {
     anyhow::bail!(
-      "division {} has {n} robots/team, but the in-process AI (CrashPilot) supports at most 8. Use --div b for matches against Sumatra.",
-      mc.div
+      "division {} has {} robots/team, but the in-process AI (CrashPilot) supports at most 8. Use --div b or --blue-bots/--yellow-bots <= 8 for matches against Sumatra.",
+      mc.div,
+      bots.blue.max(bots.yellow),
     );
   }
 
   let mut engine = SimulationEngine::new(1, cfg.clone());
 
   // In-process controllers for any non-external side.
-  let mut blue_ctrl: Option<Box<dyn Controller>> =
-    (!mc.blue.is_external()).then(|| build_controller(&mc.blue, TeamColor::Blue, n));
-  let mut yellow_ctrl: Option<Box<dyn Controller>> =
-    (!mc.yellow.is_external()).then(|| build_controller(&mc.yellow, TeamColor::Yellow, n));
+  let mut blue_ctrl: Option<Box<dyn Controller>> = (bots.blue > 0 && !mc.blue.is_external())
+    .then(|| build_controller(&mc.blue, TeamColor::Blue, bots.blue as u8));
+  let mut yellow_ctrl: Option<Box<dyn Controller>> = (bots.yellow > 0 && !mc.yellow.is_external())
+    .then(|| build_controller(&mc.yellow, TeamColor::Yellow, bots.yellow as u8));
 
-  let blue_name = format!("blue:{}", side_name(&mc.blue, blue_ctrl.as_deref()));
-  let yellow_name = format!("yellow:{}", side_name(&mc.yellow, yellow_ctrl.as_deref()));
+  let blue_name = format!(
+    "blue:{}",
+    side_name(&mc.blue, blue_ctrl.as_deref(), bots.blue)
+  );
+  let yellow_name = format!(
+    "yellow:{}",
+    side_name(&mc.yellow, yellow_ctrl.as_deref(), bots.yellow)
+  );
 
   // Bind the SimNet server, then launch one Sumatra JVM per external side.
   let mut server = SumatraSimNetServer::bind(SumatraSimNetConfig::default())
     .context("bind Sumatra SimNet server")?;
   let mut instances = Vec::new();
-  for (kind, color) in [(&mc.blue, TeamColor::Blue), (&mc.yellow, TeamColor::Yellow)] {
-    if kind.is_external() {
+  for (kind, color, count) in [
+    (&mc.blue, TeamColor::Blue, bots.blue),
+    (&mc.yellow, TeamColor::Yellow, bots.yellow),
+  ] {
+    if count > 0 && kind.is_external() {
       let inst = SumatraInstance::spawn(&SumatraLaunchConfig {
         remote_client: true,
         ai_blue: color == TeamColor::Blue,
@@ -121,7 +135,8 @@ fn try_run(mc: &MatchConfig) -> Result<MatchReport> {
     println!("Sumatra connected; kickoff.");
   }
 
-  let mut director = MatchDirector::new(cfg.clone(), mc.seconds);
+  let mut director = MatchDirector::new(cfg.clone(), mc.seconds)
+    .with_bot_counts(physical_bots.blue, physical_bots.yellow);
   let mut evaluator = Evaluator::new(cfg.clone(), blue_name.clone(), yellow_name.clone());
   #[cfg(feature = "referris")]
   let mut referris = crate::referris_autoref::ReferrisAutoref::new();
@@ -254,7 +269,10 @@ fn pop_state(mut states: Vec<WorldState>) -> Option<WorldState> {
   }
 }
 
-fn side_name(kind: &TeamKind, ctrl: Option<&dyn Controller>) -> String {
+fn side_name(kind: &TeamKind, ctrl: Option<&dyn Controller>, bots: usize) -> String {
+  if bots == 0 {
+    return format!("{}:0bots", kind.label());
+  }
   match ctrl {
     Some(c) => c.name().to_string(),
     None => kind.label().to_string(),

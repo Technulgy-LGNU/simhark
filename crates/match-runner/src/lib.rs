@@ -10,12 +10,12 @@ pub mod referris_autoref;
 #[cfg(feature = "sumatra")]
 pub mod sumatra_match;
 
-use controller::{build_controller, TeamKind};
+use controller::{TeamKind, build_controller};
 use director::MatchDirector;
 use evaluator::{Evaluator, MatchReport};
 use logio::GameLog;
 use simhark::{
-    MoveCommand, RobotCommand, RobotState, SimulationEngine, TeamColor, WorldConfig, WorldState,
+  MoveCommand, RobotCommand, RobotState, SimulationEngine, TeamColor, WorldConfig, WorldState,
 };
 
 /// Everything needed to play one match.
@@ -23,6 +23,10 @@ use simhark::{
 pub struct MatchConfig {
   pub blue: TeamKind,
   pub yellow: TeamKind,
+  /// Available blue robots. Defaults to the division robot count.
+  pub blue_bots: Option<usize>,
+  /// Available yellow robots. Defaults to the division robot count.
+  pub yellow_bots: Option<usize>,
   pub seconds: f64,
   pub div: char,
   pub seed: u64,
@@ -37,6 +41,8 @@ pub struct MatchConfig {
   pub print_commands: bool,
   /// Frame interval for command printing.
   pub print_commands_every: u64,
+  /// Warn when a close slow ball is not acquired or a fast reachable pickup point is idle.
+  pub validate_pickup: bool,
 }
 
 impl Default for MatchConfig {
@@ -44,6 +50,8 @@ impl Default for MatchConfig {
     Self {
       blue: TeamKind::Bangka,
       yellow: TeamKind::Bangka,
+      blue_bots: None,
+      yellow_bots: None,
       seconds: 60.0,
       div: 'b',
       seed: 1,
@@ -54,6 +62,7 @@ impl Default for MatchConfig {
       realtime: false,
       print_commands: false,
       print_commands_every: 60,
+      validate_pickup: false,
     }
   }
 }
@@ -67,12 +76,45 @@ pub fn world_config(div: char, seed: u64) -> WorldConfig {
   cfg
 }
 
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct TeamBotCounts {
+  pub blue: usize,
+  pub yellow: usize,
+}
+
+impl MatchConfig {
+  pub(crate) fn bot_counts(&self, default: usize) -> TeamBotCounts {
+    TeamBotCounts {
+      blue: self.blue_bots.unwrap_or(default),
+      yellow: self.yellow_bots.unwrap_or(default),
+    }
+  }
+
+  pub(crate) fn physical_bot_counts(&self, default: usize) -> TeamBotCounts {
+    TeamBotCounts {
+      blue: physical_bot_count(self.blue_bots, default),
+      yellow: physical_bot_count(self.yellow_bots, default),
+    }
+  }
+}
+
+fn physical_bot_count(configured: Option<usize>, default: usize) -> usize {
+  match configured {
+    Some(0) | None => default,
+    Some(count) => count,
+  }
+}
+
 /// Play one match start-to-finish and return its evaluation.
 ///
 /// If either side is an external AI (e.g. the real Sumatra), the match is run
 /// through the SimNet hybrid path; otherwise both sides are driven in-process.
 pub fn run_match(mc: &MatchConfig) -> MatchReport {
-  if mc.blue.is_external() || mc.yellow.is_external() {
+  let default_bots = world_config(mc.div, mc.seed).robots_per_team;
+  let route_bots = mc.bot_counts(default_bots);
+  let has_active_external = (route_bots.blue > 0 && mc.blue.is_external())
+    || (route_bots.yellow > 0 && mc.yellow.is_external());
+  if has_active_external {
     #[cfg(feature = "sumatra")]
     return sumatra_match::run(mc);
     #[cfg(not(feature = "sumatra"))]
@@ -89,16 +131,28 @@ pub fn run_match(mc: &MatchConfig) -> MatchReport {
       .finish(0.0);
     }
   }
-  let cfg = world_config(mc.div, mc.seed);
+  let mut cfg = world_config(mc.div, mc.seed);
+  let default_bots = cfg.robots_per_team;
+  let bots = mc.bot_counts(default_bots);
+  let physical_bots = mc.physical_bot_counts(default_bots);
+  cfg.robots_per_team = physical_bots.blue.max(physical_bots.yellow);
   let mut engine = SimulationEngine::new(1, cfg.clone());
 
-  let n = cfg.robots_per_team as u8;
-  let mut blue_ctrl = build_controller(&mc.blue, TeamColor::Blue, n);
-  let mut yellow_ctrl = build_controller(&mc.yellow, TeamColor::Yellow, n);
-  let blue_name = format!("blue:{}", blue_ctrl.name());
-  let yellow_name = format!("yellow:{}", yellow_ctrl.name());
+  let mut blue_ctrl =
+    (bots.blue > 0).then(|| build_controller(&mc.blue, TeamColor::Blue, bots.blue as u8));
+  let mut yellow_ctrl =
+    (bots.yellow > 0).then(|| build_controller(&mc.yellow, TeamColor::Yellow, bots.yellow as u8));
+  let blue_name = format!(
+    "blue:{}",
+    side_name(&mc.blue, blue_ctrl.as_deref(), bots.blue)
+  );
+  let yellow_name = format!(
+    "yellow:{}",
+    side_name(&mc.yellow, yellow_ctrl.as_deref(), bots.yellow)
+  );
 
-  let mut director = MatchDirector::new(cfg.clone(), mc.seconds);
+  let mut director = MatchDirector::new(cfg.clone(), mc.seconds)
+    .with_bot_counts(physical_bots.blue, physical_bots.yellow);
   let mut evaluator = Evaluator::new(cfg.clone(), blue_name.clone(), yellow_name.clone());
   #[cfg(feature = "referris")]
   let mut referris = referris_autoref::ReferrisAutoref::new();
@@ -134,9 +188,16 @@ pub fn run_match(mc: &MatchConfig) -> MatchReport {
   while !director.is_over(&state) {
     let gc_blue = director.command_for(TeamColor::Blue);
     let gc_yellow = director.command_for(TeamColor::Yellow);
-    let blue_cmds = blue_ctrl.act(&state, &cfg, TeamColor::Blue, gc_blue);
-    let yellow_cmds = yellow_ctrl.act(&state, &cfg, TeamColor::Yellow, gc_yellow);
+    let blue_cmds = blue_ctrl
+      .as_mut()
+      .map(|ctrl| ctrl.act(&state, &cfg, TeamColor::Blue, gc_blue))
+      .unwrap_or_default();
+    let yellow_cmds = yellow_ctrl
+      .as_mut()
+      .map(|ctrl| ctrl.act(&state, &cfg, TeamColor::Yellow, gc_yellow))
+      .unwrap_or_default();
     maybe_print_commands(mc, state.sim_time, state.frame, &blue_cmds, &yellow_cmds);
+    pickup_validator.maybe_validate(mc, &state, &blue_cmds, &yellow_cmds);
 
     let mut wc = director.update(&state);
     if let Some(scorer) = director.take_goal() {
@@ -178,18 +239,23 @@ pub fn run_match(mc: &MatchConfig) -> MatchReport {
       let (bx, by) = (new_state.ball.x, new_state.ball.y);
       let nearest = |rs: &[simhark::RobotState]| {
         rs.iter()
-          .map(|r| ((r.x - bx).powi(2) + (r.y - by).powi(2)).sqrt())
-          .fold(f64::INFINITY, f64::min)
+          .map(|r| (r.id, ((r.x - bx).powi(2) + (r.y - by).powi(2)).sqrt()))
+          .min_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal))
+          .unwrap_or((usize::MAX, f64::INFINITY))
       };
+      let (near_blue_id, near_blue_dist) = nearest(&new_state.blue_robots);
+      let (near_yellow_id, near_yellow_dist) = nearest(&new_state.yellow_robots);
       eprintln!(
-        "[match] t={:.1} ball=({:.2},{:.2}) v=({:.2},{:.2}) blue_ir={bh} blue_drib={bd} yel_ir={yh} near_b={:.2} near_y={:.2}",
+        "[match] t={:.1} ball=({:.2},{:.2}) v=({:.2},{:.2}) blue_ir={bh} blue_drib={bd} yel_ir={yh} near_b={}:{} near_y={}:{}",
         new_state.sim_time,
         bx,
         by,
         new_state.ball.vx,
         new_state.ball.vy,
-        nearest(&new_state.blue_robots),
-        nearest(&new_state.yellow_robots),
+        near_blue_id,
+        near_blue_dist,
+        near_yellow_id,
+        near_yellow_dist,
       );
     }
 
@@ -294,4 +360,299 @@ impl PickupValidator {
     );
   }
 }
+
+fn validate_pickup_for_team(
+  state: &WorldState,
+  team: TeamColor,
+  commands: &[RobotCommand],
+  slow_active: &mut bool,
+  fast_active: &mut bool,
+  warnings: &mut u32,
+) {
+  let ball_speed = state.ball.vx.hypot(state.ball.vy);
+  if ball_speed > 1.0 {
+    *slow_active = false;
+    validate_fast_pickup_for_team(state, team, commands, fast_active, warnings, ball_speed);
+    return;
+  }
+  *fast_active = false;
+
+  let (own, opp) = match team {
+    TeamColor::Blue => (&state.blue_robots, &state.yellow_robots),
+    TeamColor::Yellow => (&state.yellow_robots, &state.blue_robots),
+  };
+  let Some(closest) = closest_robot(own, state.ball.x, state.ball.y) else {
+    *slow_active = false;
+    return;
+  };
+  let Some(opp_closest) = closest_robot(opp, state.ball.x, state.ball.y) else {
+    *slow_active = false;
+    return;
+  };
+
+  let close_and_first = closest.1 <= 0.18 && opp_closest.1 >= closest.1 + 0.12;
+  if !close_and_first {
+    *slow_active = false;
+    return;
+  }
+
+  if closest.0.infrared || command_tries_to_acquire(commands, closest.0, state.ball.x, state.ball.y)
+  {
+    *slow_active = false;
+    return;
+  }
+
+  if !*slow_active {
+    *warnings += 1;
+    let command = format_optional_robot_command(commands, closest.0.id);
+    eprintln!(
+      "[pickup-validator] t={:.2} frame={} team={:?} robot={} dist={:.3}m ball_speed={:.2}m/s opp_dist={:.3}m command={}: close slow ball but command is not acquiring",
+      state.sim_time,
+      state.frame,
+      team,
+      closest.0.id,
+      closest.1,
+      ball_speed,
+      opp_closest.1,
+      command,
+    );
+  }
+  *slow_active = true;
+}
+
+fn validate_fast_pickup_for_team(
+  state: &WorldState,
+  team: TeamColor,
+  commands: &[RobotCommand],
+  active: &mut bool,
+  warnings: &mut u32,
+  ball_speed: f64,
+) {
+  let (own, opp) = match team {
+    TeamColor::Blue => (&state.blue_robots, &state.yellow_robots),
+    TeamColor::Yellow => (&state.yellow_robots, &state.blue_robots),
+  };
+  let Some(candidate) = predicted_fast_pickup_candidate(state, own, opp, ball_speed) else {
+    *active = false;
+    return;
+  };
+
+  if command_tries_to_reach_point(
+    commands,
+    candidate.robot,
+    candidate.target_x,
+    candidate.target_y,
+  ) {
+    *active = false;
+    return;
+  }
+
+  if !*active {
+    *warnings += 1;
+    let command = format_optional_robot_command(commands, candidate.robot.id);
+    eprintln!(
+      "[pickup-validator] t={:.2} frame={} team={:?} robot={} target=({:.3},{:.3}) lead={:.2}s dist={:.3}m ball_speed={:.2}m/s opp_dist={:.3}m command={}: fast ball predicted pickup point is reachable but command is idle",
+      state.sim_time,
+      state.frame,
+      team,
+      candidate.robot.id,
+      candidate.target_x,
+      candidate.target_y,
+      candidate.lead_s,
+      candidate.dist,
+      ball_speed,
+      candidate.opp_dist,
+      command,
+    );
+  }
+  *active = true;
+}
+
+struct FastPickupCandidate<'a> {
+  robot: &'a RobotState,
+  target_x: f64,
+  target_y: f64,
+  lead_s: f64,
+  dist: f64,
+  opp_dist: f64,
+}
+
+fn predicted_fast_pickup_candidate<'a>(
+  state: &WorldState,
+  own: &'a [RobotState],
+  opp: &[RobotState],
+  ball_speed: f64,
+) -> Option<FastPickupCandidate<'a>> {
+  let max_lead = (0.90 / ball_speed).clamp(0.30, 0.85);
+  let mut lead = 0.15;
+
+  while lead <= max_lead {
+    let target_x = (state.ball.x + state.ball.vx * lead).clamp(-0.5, 0.5);
+    let target_y = (state.ball.y + state.ball.vy * lead).clamp(-0.5, 0.5);
+    let Some(closest) = closest_robot(own, target_x, target_y) else {
+      return None;
+    };
+    let Some(opp_closest) = closest_robot(opp, target_x, target_y) else {
+      return None;
+    };
+
+    let reachable_dist = (0.16 + 0.55 * lead).min(0.42);
+    if closest.1 <= reachable_dist && opp_closest.1 >= closest.1 + 0.15 {
+      return Some(FastPickupCandidate {
+        robot: closest.0,
+        target_x,
+        target_y,
+        lead_s: lead,
+        dist: closest.1,
+        opp_dist: opp_closest.1,
+      });
+    }
+
+    lead += 1.0 / 30.0;
+  }
+
+  None
+}
+
+fn closest_robot(robots: &[RobotState], ball_x: f64, ball_y: f64) -> Option<(&RobotState, f64)> {
+  robots
+    .iter()
+    .filter(|robot| robot.is_on)
+    .map(|robot| (robot, (robot.x - ball_x).hypot(robot.y - ball_y)))
+    .min_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal))
+}
+
+fn command_tries_to_acquire(
+  commands: &[RobotCommand],
+  robot: &RobotState,
+  ball_x: f64,
+  ball_y: f64,
+) -> bool {
+  commands
+    .iter()
+    .find(|command| command.id == robot.id)
+    .is_some_and(|command| {
+      command.dribbler_on && command_moves_toward_point(command, robot, ball_x, ball_y, 0.05)
+    })
+}
+
+fn command_tries_to_reach_point(
+  commands: &[RobotCommand],
+  robot: &RobotState,
+  target_x: f64,
+  target_y: f64,
+) -> bool {
+  commands
+    .iter()
+    .find(|command| command.id == robot.id)
+    .is_some_and(|command| command_moves_toward_point(command, robot, target_x, target_y, 0.10))
+}
+
+fn command_moves_toward_point(
+  command: &RobotCommand,
+  robot: &RobotState,
+  target_x: f64,
+  target_y: f64,
+  close_enough: f64,
+) -> bool {
+  let dx = target_x - robot.x;
+  let dy = target_y - robot.y;
+  let dist = dx.hypot(dy);
+  if dist <= close_enough {
+    return command_is_active(command);
+  }
+
+  let Some((vx, vy)) = command_world_velocity(command, robot) else {
+    return false;
+  };
+  let speed = vx.hypot(vy);
+  if speed < 0.03 {
+    return false;
+  }
+
+  let closing_speed = (vx * dx + vy * dy) / dist;
+  closing_speed >= 0.03 || closing_speed >= speed * 0.35
+}
+
+fn command_world_velocity(command: &RobotCommand, robot: &RobotState) -> Option<(f64, f64)> {
+  match command.move_command.as_ref()? {
+    MoveCommand::GlobalVelocity { vx, vy, .. } => Some((*vx, *vy)),
+    MoveCommand::LocalVelocity { forward, left, .. } => {
+      let (sin, cos) = robot.orientation.sin_cos();
+      Some((forward * cos - left * sin, forward * sin + left * cos))
+    }
+    MoveCommand::WheelVelocity(_) => None,
+  }
+}
+
+fn side_name(kind: &TeamKind, ctrl: Option<&dyn controller::Controller>, bots: usize) -> String {
+  if bots == 0 {
+    return format!("{}:0bots", kind.label());
+  }
+  match ctrl {
+    Some(c) => c.name().to_string(),
+    None => kind.label().to_string(),
+  }
+}
+
+fn format_optional_robot_command(commands: &[RobotCommand], robot_id: usize) -> String {
+  commands
+    .iter()
+    .find(|command| command.id == robot_id)
+    .map(format_robot_command)
+    .unwrap_or_else(|| "<missing>".to_string())
+}
+
+fn print_team_commands(team: &str, commands: &[RobotCommand]) {
+  let active: Vec<String> = commands
+    .iter()
+    .filter(|command| command_is_active(command))
+    .map(format_robot_command)
+    .collect();
+
+  if active.is_empty() {
+    eprintln!("  {team}: <none>");
+  } else {
+    eprintln!("  {team}: {}", active.join(" | "));
+  }
+}
+
+fn command_is_active(command: &RobotCommand) -> bool {
+  command.move_command.is_some() || command.kick_speed.abs() > 1e-6 || command.dribbler_on
+}
+
+fn format_robot_command(command: &RobotCommand) -> String {
+  let motion = command
+    .move_command
+    .as_ref()
+    .map(format_move_command)
+    .unwrap_or_else(|| "hold".to_string());
+  let mut parts = vec![format!("#{} {motion}", command.id)];
+  if command.dribbler_on {
+    parts.push("drib".to_string());
+  }
+  if command.kick_speed.abs() > 1e-6 {
+    parts.push(format!(
+      "kick={:.2}m/s@{:.0}deg",
+      command.kick_speed, command.kick_angle
+    ));
+  }
+  parts.join(" ")
+}
+
+fn format_move_command(command: &MoveCommand) -> String {
+  match command {
+    MoveCommand::LocalVelocity {
+      forward,
+      left,
+      angular,
+    } => format!("local f={forward:.2} l={left:.2} w={angular:.2}"),
+    MoveCommand::GlobalVelocity { vx, vy, angular } => {
+      format!("global vx={vx:.2} vy={vy:.2} w={angular:.2}")
+    }
+    MoveCommand::WheelVelocity(wheels) => format!(
+      "wheels [{:.1},{:.1},{:.1},{:.1}]",
+      wheels[0], wheels[1], wheels[2], wheels[3]
+    ),
+  }
 }
