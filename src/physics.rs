@@ -312,12 +312,8 @@ impl PhysicsWorld {
       ball_radius: config.ball.radius as f32,
       gravity_val: config.physics.gravity as f32,
       robot_bound_x: (config.field.field_length * 0.5
-        + config.field.margin_goal_line
-        + config.field.referee_margin
         - config.blue_robots.radius.max(config.yellow_robots.radius)) as f32,
       robot_bound_y: (config.field.field_width * 0.5
-        + config.field.margin_touch_line
-        + config.field.referee_margin
         - config.blue_robots.radius.max(config.yellow_robots.radius)) as f32,
     }
   }
@@ -795,7 +791,6 @@ fn clamp_robot_velocity(body: &mut RigidBody, params: DriveParams) {
 }
 
 fn clamp_robot_position_if_escaped(body: &mut RigidBody, bound_x: f32, bound_y: f32) {
-  const ESCAPE_MARGIN: f32 = 0.05;
   const PARKED_MARGIN: f32 = 10.0;
 
   let translation = body.translation();
@@ -803,9 +798,7 @@ fn clamp_robot_position_if_escaped(body: &mut RigidBody, bound_x: f32, bound_y: 
   {
     return;
   }
-  if translation.x.abs() <= bound_x + ESCAPE_MARGIN
-    && translation.y.abs() <= bound_y + ESCAPE_MARGIN
-  {
+  if translation.x.abs() <= bound_x && translation.y.abs() <= bound_y {
     return;
   }
 

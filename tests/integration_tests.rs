@@ -176,6 +176,41 @@ fn test_ball_bounce_off_wall() {
 }
 
 #[test]
+fn test_stopped_ball_outside_touchline_is_recovered() {
+  let mut config = WorldConfig::division_a();
+  config.robots_per_team = 0;
+  let mut world = World::new(0, config.clone());
+
+  let half_length = config.field.field_length / 2.0;
+  let half_width = config.field.field_width / 2.0;
+  world.step(&WorldCommand {
+    teleport_ball: Some(TeleportBall {
+      x: Some(-half_length + 0.25),
+      y: Some(half_width + 0.05),
+      z: Some(0.0),
+      vx: Some(0.0),
+      vy: Some(0.0),
+      vz: Some(0.0),
+    }),
+    ..Default::default()
+  });
+
+  let state = world.get_state();
+  assert!(
+    state.ball.x < 0.0,
+    "test should cover the upper-left side, x={}",
+    state.ball.x
+  );
+  assert!(
+    state.ball.y <= half_width - config.ball.radius,
+    "stopped out-of-field ball should be recovered inside touchline, y={}",
+    state.ball.y
+  );
+  assert!(!state.goal_blue);
+  assert!(!state.goal_yellow);
+}
+
+#[test]
 fn test_ball_stationary_stays_put() {
   let mut config = WorldConfig::division_a();
   config.robots_per_team = 0;
@@ -432,6 +467,43 @@ fn test_teleport_robot_applies_requested_velocity() {
     "robot angular velocity should be near requested velocity, got {}",
     state.blue_robots[0].v_angular
   );
+}
+
+#[test]
+fn test_active_robot_outside_touchline_is_recovered() {
+  let mut config = WorldConfig::division_a();
+  config.robots_per_team = 1;
+  let mut world = World::new(0, config.clone());
+
+  let half_width = config.field.field_width / 2.0;
+  let robot_radius = config.blue_robots.radius.max(config.yellow_robots.radius);
+  world.step(&WorldCommand {
+    teleport_robots: vec![TeleportRobot {
+      id: 0,
+      team: TeamColor::Blue,
+      x: Some(-1.0),
+      y: Some(half_width + 0.2),
+      orientation: Some(0.0),
+      vx: Some(0.0),
+      vy: Some(1.0),
+      v_angular: Some(0.0),
+      present: Some(true),
+    }],
+    ..Default::default()
+  });
+
+  let state = world.get_state();
+  assert!(
+    state.blue_robots[0].y <= half_width - robot_radius + 0.001,
+    "active robot should be recovered inside touchline, y={}",
+    state.blue_robots[0].y
+  );
+  assert!(
+    state.blue_robots[0].vy.abs() < 0.001,
+    "outward velocity should be cleared after recovery, vy={}",
+    state.blue_robots[0].vy
+  );
+  assert!(state.blue_robots[0].is_on, "robot should remain on");
 }
 
 #[test]

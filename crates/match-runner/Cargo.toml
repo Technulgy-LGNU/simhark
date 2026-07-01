@@ -30,7 +30,7 @@ ungabunga = { path = "../../../bangka/ungabunga", optional = true }
 artificial_incompetence = { git = "https://github.com/Technulgy-LGNU/CrashPilot", optional = true }
 
 [features]
-default = ["bangka", "bongka", "ungabunga"]
+default = ["bangka", "bongka", "ungabunga", "sim-time"]
 bangka = ["dep:bangka"]
 bongka = ["dep:bongka"]
 ungabunga = ["dep:ungabunga"]

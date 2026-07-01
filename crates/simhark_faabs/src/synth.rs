@@ -13,8 +13,8 @@ pub fn force_start_referee() -> core_dump::proto::Referee {
 
 pub fn interface_command(team: TeamColor) -> InterfaceWrapperCp {
   let (team_color, side) = match team {
-    TeamColor::Yellow => (true, false),
-    TeamColor::Blue => (false, true),
+    TeamColor::Yellow => (false, false),
+    TeamColor::Blue => (true, true),
   };
   InterfaceWrapperCp {
     robot_commands: Vec::new(),
@@ -33,5 +33,19 @@ pub fn interface_command(team: TeamColor) -> InterfaceWrapperCp {
       },
       test: InterfaceTestCp::default(),
     },
+  }
+}
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+
+  #[test]
+  fn interface_command_uses_robot_code_team_color_convention() {
+    let yellow = interface_command(TeamColor::Yellow);
+    let blue = interface_command(TeamColor::Blue);
+
+    assert!(!yellow.interface_command.game.team_color);
+    assert!(blue.interface_command.game.team_color);
   }
 }

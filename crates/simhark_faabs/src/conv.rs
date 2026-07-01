@@ -1,3 +1,4 @@
+#[cfg(not(feature = "sim-time"))]
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use core_dump::proto::{
@@ -15,7 +16,7 @@ pub fn world_state_to_cp_events(events: &mut ::crashpilot::Events, state: &World
 }
 
 pub fn world_state_to_ssl_wrapper(state: &WorldState) -> Option<SslWrapperPacket> {
-  let now = unix_time_seconds();
+  let now = timestamp_seconds(state);
 
   let detection = SslDetectionFrame {
     frame_number: state.frame as u32,
@@ -84,7 +85,7 @@ pub fn world_state_to_tracker_wrapper(state: &WorldState) -> Option<TrackerWrapp
 
   let frame = TrackedFrame {
     frame_number: state.frame as u32,
-    timestamp: unix_time_seconds(),
+    timestamp: timestamp_seconds(state),
     balls: vec![TrackedBall {
       pos: Vector3 {
         x: state.ball.x as f32,
@@ -199,7 +200,13 @@ fn set_bit(flags: u32, bit: u8) -> u32 {
   flags | (1 << bit)
 }
 
-fn unix_time_seconds() -> f64 {
+#[cfg(feature = "sim-time")]
+fn timestamp_seconds(state: &WorldState) -> f64 {
+  state.sim_time
+}
+
+#[cfg(not(feature = "sim-time"))]
+fn timestamp_seconds(_state: &WorldState) -> f64 {
   SystemTime::now()
     .duration_since(UNIX_EPOCH)
     .map(|d| d.as_secs_f64())

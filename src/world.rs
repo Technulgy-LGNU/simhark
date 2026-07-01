@@ -14,6 +14,7 @@ const BALL_HOLD_TOLERANCE: f64 = 0.05;
 const BALL_HOLD_PULL_GAIN: f32 = 180.0;
 const BALL_HOLD_DAMPING_GAIN: f32 = 18.0;
 const BALL_HOLD_MAX_FORCE: f32 = 4.0;
+const BALL_OUT_OF_FIELD_RECOVERY_SPEED: f32 = 0.05;
 
 fn field_scaled_dir(yaw: f64, config: &WorldConfig) -> [f64; 2] {
   let x = yaw.cos() * config.field.field_length;
@@ -106,6 +107,7 @@ impl World {
       self.apply_dribbler_control();
       self.physics.substep();
     }
+    self.recover_stopped_out_of_field_ball();
 
     // Step robot game logic (kicker countdown, etc.)
     for sim in &mut self.blue_sims {
@@ -526,6 +528,43 @@ impl World {
     ball.set_linvel(Vector::new(vx, vy, vz), true);
     ball.set_angvel(Vector::ZERO, true);
     // The ball just got moved out from under any holder.
+    self.holder = None;
+  }
+
+  fn recover_stopped_out_of_field_ball(&mut self) {
+    let half_length = self.config.field.field_length as f32 * 0.5;
+    let half_width = self.config.field.field_width as f32 * 0.5;
+    let half_goal_width = self.config.field.goal_width as f32 * 0.5;
+    let ball_body = self.physics.ball_body;
+    let pos = self.physics.get_body_position(ball_body);
+
+    if pos.x.abs() <= half_length && pos.y.abs() <= half_width {
+      return;
+    }
+
+    if pos.x.abs() > half_length && pos.y.abs() < half_goal_width {
+      return;
+    }
+
+    let vel = self.physics.get_body_linvel(ball_body);
+    let speed = (vel.x * vel.x + vel.y * vel.y).sqrt();
+    if speed > BALL_OUT_OF_FIELD_RECOVERY_SPEED {
+      return;
+    }
+
+    let inset = self.config.ball.radius as f32 + 0.002;
+    let recovered_x = pos.x.clamp(-half_length + inset, half_length - inset);
+    let recovered_y = pos.y.clamp(-half_width + inset, half_width - inset);
+    if (recovered_x - pos.x).abs() <= f32::EPSILON && (recovered_y - pos.y).abs() <= f32::EPSILON {
+      return;
+    }
+
+    self
+      .physics
+      .teleport_body(ball_body, recovered_x, recovered_y, pos.z);
+    let ball = &mut self.physics.rigid_body_set[ball_body];
+    ball.set_linvel(Vector::ZERO, true);
+    ball.set_angvel(Vector::ZERO, true);
     self.holder = None;
   }
 
