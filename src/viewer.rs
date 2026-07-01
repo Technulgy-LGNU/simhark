@@ -15,6 +15,8 @@ use tiny_http::{Header, Method, Response, Server, StatusCode};
 use tungstenite::{Message, accept};
 
 use crate::config::{FieldConfig, WorldConfig};
+#[cfg(feature = "viewer-debug")]
+use crate::state::TeamColor;
 use crate::state::WorldState;
 
 #[derive(Debug, Clone, Copy)]
@@ -61,6 +63,59 @@ pub struct GameStateInfo {
   pub stage: Option<String>,
   pub blue_name: Option<String>,
   pub yellow_name: Option<String>,
+}
+
+#[cfg(feature = "viewer-debug")]
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct ViewerDebugSnapshot {
+  pub world_id: usize,
+  pub strategy: Option<String>,
+  pub robots: Vec<RobotDebugInfo>,
+  pub overlays: Vec<DebugOverlay>,
+}
+
+#[cfg(feature = "viewer-debug")]
+#[derive(Debug, Clone, Serialize)]
+pub struct RobotDebugInfo {
+  pub team: TeamColor,
+  pub id: usize,
+  /// Short task label, e.g. `Attacker`, `Receiver`, `Marking`.
+  pub task: String,
+  /// CSS color string used by the browser viewer, preferably `#RRGGBB`.
+  pub color: String,
+  pub message: Option<String>,
+}
+
+#[cfg(feature = "viewer-debug")]
+#[derive(Debug, Clone, Serialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum DebugOverlay {
+  HoloRobot(DebugHoloRobot),
+  KickLine(DebugKickLine),
+}
+
+#[cfg(feature = "viewer-debug")]
+#[derive(Debug, Clone, Serialize)]
+pub struct DebugHoloRobot {
+  pub team: TeamColor,
+  pub id: usize,
+  pub x: f64,
+  pub y: f64,
+  pub orientation: Option<f64>,
+  pub color: String,
+  pub label: Option<String>,
+}
+
+#[cfg(feature = "viewer-debug")]
+#[derive(Debug, Clone, Serialize)]
+pub struct DebugKickLine {
+  pub team: TeamColor,
+  pub id: usize,
+  pub from_x: f64,
+  pub from_y: f64,
+  pub angle: f64,
+  pub color: String,
+  pub label: Option<String>,
 }
 
 #[derive(Default)]
@@ -165,6 +220,8 @@ pub struct ViewerServer {
   game_state: Arc<Mutex<GameStateTracker>>,
   test_suite: Arc<Mutex<Option<Value>>>,
   goal_tracker: Arc<Mutex<GoalTracker>>,
+  #[cfg(feature = "viewer-debug")]
+  debug: Arc<Mutex<HashMap<usize, ViewerDebugSnapshot>>>,
   control: Arc<WebControlState>,
   _http_thread: thread::JoinHandle<()>,
   _ws_thread: thread::JoinHandle<()>,
@@ -184,6 +241,8 @@ struct ViewerFrame<'a> {
   test_suite: Option<Value>,
   goals: GoalSummary,
   control: ControlSnapshot,
+  #[cfg(feature = "viewer-debug")]
+  debug: Option<ViewerDebugSnapshot>,
 }
 
 impl ViewerServer {
@@ -204,6 +263,8 @@ impl ViewerServer {
     let game_state = Arc::new(Mutex::new(GameStateTracker::default()));
     let test_suite = Arc::new(Mutex::new(None));
     let goal_tracker = Arc::new(Mutex::new(GoalTracker::default()));
+    #[cfg(feature = "viewer-debug")]
+    let debug = Arc::new(Mutex::new(HashMap::new()));
     let control = Arc::new(WebControlState::default());
     // When web control is disabled the simulator is considered always
     // running, so callers that don't opt in see the legacy behaviour.
@@ -242,6 +303,8 @@ impl ViewerServer {
       game_state,
       test_suite,
       goal_tracker,
+      #[cfg(feature = "viewer-debug")]
+      debug,
       control,
       _http_thread: http_thread,
       _ws_thread: ws_thread,
@@ -321,6 +384,64 @@ impl ViewerServer {
     *self.test_suite.lock() = serde_json::to_value(suite).ok();
   }
 
+  #[cfg(feature = "viewer-debug")]
+  pub fn set_debug_snapshot(&self, snapshot: ViewerDebugSnapshot) {
+    self.debug.lock().insert(snapshot.world_id, snapshot);
+  }
+
+  #[cfg(feature = "viewer-debug")]
+  pub fn clear_debug_snapshot(&self, world_id: usize) {
+    self.debug.lock().remove(&world_id);
+  }
+
+  #[cfg(feature = "viewer-debug")]
+  pub fn set_strategy_debug_message(&self, world_id: usize, message: impl Into<String>) {
+    let mut debug = self.debug.lock();
+    let snapshot = debug
+      .entry(world_id)
+      .or_insert_with(|| ViewerDebugSnapshot {
+        world_id,
+        ..ViewerDebugSnapshot::default()
+      });
+    snapshot.strategy = Some(message.into());
+  }
+
+  #[cfg(feature = "viewer-debug")]
+  pub fn clear_strategy_debug_message(&self, world_id: usize) {
+    if let Some(snapshot) = self.debug.lock().get_mut(&world_id) {
+      snapshot.strategy = None;
+    }
+  }
+
+  #[cfg(feature = "viewer-debug")]
+  pub fn set_robot_debug(&self, world_id: usize, info: RobotDebugInfo) {
+    let mut debug = self.debug.lock();
+    let snapshot = debug
+      .entry(world_id)
+      .or_insert_with(|| ViewerDebugSnapshot {
+        world_id,
+        ..ViewerDebugSnapshot::default()
+      });
+    if let Some(existing) = snapshot
+      .robots
+      .iter_mut()
+      .find(|robot| robot.team == info.team && robot.id == info.id)
+    {
+      *existing = info;
+    } else {
+      snapshot.robots.push(info);
+    }
+  }
+
+  #[cfg(feature = "viewer-debug")]
+  pub fn clear_robot_debug(&self, world_id: usize, team: TeamColor, id: usize) {
+    if let Some(snapshot) = self.debug.lock().get_mut(&world_id) {
+      snapshot
+        .robots
+        .retain(|robot| robot.team != team || robot.id != id);
+    }
+  }
+
   pub fn publish(&self, state: &WorldState) {
     self.publish_states(std::slice::from_ref(state));
   }
@@ -338,6 +459,8 @@ impl ViewerServer {
       .iter()
       .filter_map(|world| state_by_world_id(states, *world))
       .collect::<Vec<_>>();
+    #[cfg(feature = "viewer-debug")]
+    let debug = self.debug.lock().get(&state.world_id).cloned();
     let frame = ViewerFrame {
       world_count: self.world_count,
       selected_world: self.selected_world(),
@@ -364,6 +487,8 @@ impl ViewerServer {
         running: self.control.running.load(Ordering::Relaxed),
         speed: self.speed(),
       },
+      #[cfg(feature = "viewer-debug")]
+      debug,
     };
 
     if let Ok(json) = serde_json::to_string(&frame) {
@@ -381,8 +506,15 @@ fn run_http_server(server: Server, ws_port: u16) {
   let html_type = Header::from_bytes(&b"Content-Type"[..], &b"text/html; charset=utf-8"[..]).ok();
 
   for request in server.incoming_requests() {
-    let response = match (request.method(), request.url()) {
-      (&Method::Get, "/") | (&Method::Get, "/index.html") => {
+    let path = request
+      .url()
+      .split_once('?')
+      .map_or(request.url(), |(path, _)| path);
+    let response = match (request.method(), path) {
+      (&Method::Get, "/")
+      | (&Method::Get, "/index.html")
+      | (&Method::Get, "/debug")
+      | (&Method::Get, "/debug-big") => {
         let body = render_index(ws_port);
         let mut response = Response::from_string(body).with_status_code(StatusCode(200));
         if let Some(header) = html_type.clone() {

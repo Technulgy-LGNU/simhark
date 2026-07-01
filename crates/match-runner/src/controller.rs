@@ -22,6 +22,10 @@ pub enum GameCommand {
 
 pub trait Controller {
   fn name(&self) -> &str;
+  #[cfg(feature = "viewer-debug")]
+  fn debug_snapshot(&self) -> Option<simhark::viewer::ViewerDebugSnapshot> {
+    None
+  }
   fn act(
     &mut self,
     state: &WorldState,
@@ -52,6 +56,11 @@ pub struct FaabsController<A: Ai> {
 impl<A: Ai + Send> Controller for FaabsController<A> {
   fn name(&self) -> &str {
     &self.name
+  }
+
+  #[cfg(feature = "viewer-debug")]
+  fn debug_snapshot(&self) -> Option<simhark::viewer::ViewerDebugSnapshot> {
+    self.faabs.debug_snapshot()
   }
 
   fn act(

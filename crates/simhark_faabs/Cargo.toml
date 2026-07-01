@@ -19,8 +19,10 @@ prost = { version = "0.14.3", optional = true }
 [features]
 default = []
 viewer = ["simhark_testing/viewer", "dep:tokio"]
+viewer-debug = ["viewer", "simhark/viewer-debug", "crashpilot/viewer-debug"]
 interface = ["dep:tokio-tungstenite", "dep:futures-util", "dep:prost", "crashpilot/interface"]
 testing = ["dep:simhark_testing"]
+sim-time = ["crashpilot/sim-time"]
 
 [[bin]]
 name = "goalie_tests"

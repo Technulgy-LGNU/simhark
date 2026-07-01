@@ -18,6 +18,9 @@ use simhark::{
   MoveCommand, RobotCommand, RobotState, SimulationEngine, TeamColor, WorldConfig, WorldState,
 };
 
+#[cfg(feature = "sim-time")]
+const SIM_TIME_STEP_MS: &str = "16.666666";
+
 /// Everything needed to play one match.
 #[derive(Clone)]
 pub struct MatchConfig {
@@ -110,6 +113,9 @@ fn physical_bot_count(configured: Option<usize>, default: usize) -> usize {
 /// If either side is an external AI (e.g. the real Sumatra), the match is run
 /// through the SimNet hybrid path; otherwise both sides are driven in-process.
 pub fn run_match(mc: &MatchConfig) -> MatchReport {
+  #[cfg(feature = "sim-time")]
+  let _fixed_firmware_dt = FixedFirmwareDt::enable();
+
   let default_bots = world_config(mc.div, mc.seed).robots_per_team;
   let route_bots = mc.bot_counts(default_bots);
   let has_active_external = (route_bots.blue > 0 && mc.blue.is_external())
@@ -224,40 +230,7 @@ pub fn run_match(mc: &MatchConfig) -> MatchReport {
       mc.quiet,
     );
 
-    if std::env::var("MATCH_DEBUG").is_ok() && new_state.frame % 120 == 0 {
-      let bh = new_state.blue_robots.iter().filter(|r| r.infrared).count();
-      let yh = new_state
-        .yellow_robots
-        .iter()
-        .filter(|r| r.infrared)
-        .count();
-      let bd = new_state
-        .blue_robots
-        .iter()
-        .filter(|r| r.dribbler_on)
-        .count();
-      let (bx, by) = (new_state.ball.x, new_state.ball.y);
-      let nearest = |rs: &[simhark::RobotState]| {
-        rs.iter()
-          .map(|r| (r.id, ((r.x - bx).powi(2) + (r.y - by).powi(2)).sqrt()))
-          .min_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal))
-          .unwrap_or((usize::MAX, f64::INFINITY))
-      };
-      let (near_blue_id, near_blue_dist) = nearest(&new_state.blue_robots);
-      let (near_yellow_id, near_yellow_dist) = nearest(&new_state.yellow_robots);
-      eprintln!(
-        "[match] t={:.1} ball=({:.2},{:.2}) v=({:.2},{:.2}) blue_ir={bh} blue_drib={bd} yel_ir={yh} near_b={}:{} near_y={}:{}",
-        new_state.sim_time,
-        bx,
-        by,
-        new_state.ball.vx,
-        new_state.ball.vy,
-        near_blue_id,
-        near_blue_dist,
-        near_yellow_id,
-        near_yellow_dist,
-      );
-    }
+    maybe_debug_match_state(&new_state);
 
     if let Some(log) = log.as_mut() {
       if new_state.frame % mc.log_every == 0 {
@@ -285,6 +258,13 @@ pub fn run_match(mc: &MatchConfig) -> MatchReport {
         blue_name: Some(blue_name.clone()),
         yellow_name: Some(yellow_name.clone()),
       });
+      #[cfg(feature = "viewer-debug")]
+      publish_controller_debug(
+        v,
+        new_state.world_id,
+        blue_ctrl.as_deref(),
+        yellow_ctrl.as_deref(),
+      );
       v.publish(&new_state);
     }
     if pace {
@@ -298,6 +278,97 @@ pub fn run_match(mc: &MatchConfig) -> MatchReport {
     let _ = log.close();
   }
   evaluator.finish(state.sim_time)
+}
+
+#[cfg(feature = "sim-time")]
+struct FixedFirmwareDt {
+  previous: Option<std::ffi::OsString>,
+}
+
+#[cfg(feature = "sim-time")]
+impl FixedFirmwareDt {
+  fn enable() -> Self {
+    let previous = std::env::var_os("SIMHARK_FIXED_DT_MS");
+    if previous.is_none() {
+      unsafe {
+        std::env::set_var("SIMHARK_FIXED_DT_MS", SIM_TIME_STEP_MS);
+      }
+    }
+    Self { previous }
+  }
+}
+
+#[cfg(feature = "sim-time")]
+impl Drop for FixedFirmwareDt {
+  fn drop(&mut self) {
+    match self.previous.take() {
+      Some(value) => unsafe {
+        std::env::set_var("SIMHARK_FIXED_DT_MS", value);
+      },
+      None => unsafe {
+        std::env::remove_var("SIMHARK_FIXED_DT_MS");
+      },
+    }
+  }
+}
+
+fn maybe_debug_match_state(state: &WorldState) {
+  let frame = state.frame;
+  let in_requested_window = std::env::var("MATCH_DEBUG_FRAMES")
+    .ok()
+    .and_then(|value| parse_frame_range(&value))
+    .is_some_and(|(start, end)| frame >= start && frame <= end);
+  if !in_requested_window && !(std::env::var("MATCH_DEBUG").is_ok() && frame % 120 == 0) {
+    return;
+  }
+
+  let bh = state.blue_robots.iter().filter(|r| r.infrared).count();
+  let yh = state.yellow_robots.iter().filter(|r| r.infrared).count();
+  let bd = state.blue_robots.iter().filter(|r| r.dribbler_on).count();
+  let yd = state.yellow_robots.iter().filter(|r| r.dribbler_on).count();
+  let (bx, by) = (state.ball.x, state.ball.y);
+  let nearest = |rs: &[RobotState]| {
+    rs.iter()
+      .map(|r| (r.id, ((r.x - bx).powi(2) + (r.y - by).powi(2)).sqrt()))
+      .min_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal))
+      .unwrap_or((usize::MAX, f64::INFINITY))
+  };
+  let (near_blue_id, near_blue_dist) = nearest(&state.blue_robots);
+  let (near_yellow_id, near_yellow_dist) = nearest(&state.yellow_robots);
+  eprintln!(
+    "[match] frame={} t={:.2} ball=({:.3},{:.3}) v=({:.3},{:.3}) blue_ir={bh} blue_drib={bd} yel_ir={yh} yel_drib={yd} near_b={}:{} near_y={}:{}",
+    frame,
+    state.sim_time,
+    bx,
+    by,
+    state.ball.vx,
+    state.ball.vy,
+    near_blue_id,
+    near_blue_dist,
+    near_yellow_id,
+    near_yellow_dist,
+  );
+
+  if in_requested_window {
+    for robot in &state.yellow_robots {
+      eprintln!(
+        "  y#{:<2} pos=({:+.3},{:+.3}) v=({:+.3},{:+.3}) heading={:+.3} ir={} drib={}",
+        robot.id,
+        robot.x,
+        robot.y,
+        robot.vx,
+        robot.vy,
+        robot.orientation,
+        robot.infrared,
+        robot.dribbler_on,
+      );
+    }
+  }
+}
+
+fn parse_frame_range(value: &str) -> Option<(u64, u64)> {
+  let (start, end) = value.split_once(':')?;
+  Some((start.parse().ok()?, end.parse().ok()?))
 }
 
 pub(crate) fn maybe_print_commands(
@@ -593,6 +664,49 @@ fn side_name(kind: &TeamKind, ctrl: Option<&dyn controller::Controller>, bots: u
     Some(c) => c.name().to_string(),
     None => kind.label().to_string(),
   }
+}
+
+#[cfg(feature = "viewer-debug")]
+pub(crate) fn publish_controller_debug(
+  viewer: &simhark::viewer::ViewerServer,
+  world_id: usize,
+  blue: Option<&dyn controller::Controller>,
+  yellow: Option<&dyn controller::Controller>,
+) {
+  let snapshots = [blue, yellow]
+    .into_iter()
+    .flatten()
+    .filter_map(controller::Controller::debug_snapshot)
+    .collect::<Vec<_>>();
+
+  if snapshots.is_empty() {
+    viewer.clear_debug_snapshot(world_id);
+    return;
+  }
+
+  let strategy = snapshots
+    .iter()
+    .filter_map(|snapshot| snapshot.strategy.as_deref())
+    .filter(|message| !message.is_empty())
+    .collect::<Vec<_>>()
+    .join(" | ");
+  let robots = snapshots
+    .into_iter()
+    .flat_map(|snapshot| snapshot.robots)
+    .collect();
+  let overlays = [blue, yellow]
+    .into_iter()
+    .flatten()
+    .filter_map(controller::Controller::debug_snapshot)
+    .flat_map(|snapshot| snapshot.overlays)
+    .collect();
+
+  viewer.set_debug_snapshot(simhark::viewer::ViewerDebugSnapshot {
+    world_id,
+    strategy: (!strategy.is_empty()).then_some(strategy),
+    robots,
+    overlays,
+  });
 }
 
 fn format_optional_robot_command(commands: &[RobotCommand], robot_id: usize) -> String {

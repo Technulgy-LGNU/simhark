@@ -16,6 +16,7 @@ resolver = "2"
 [features]
 default = []
 viewer = ["dep:tiny_http", "dep:tungstenite"]
+viewer-debug = ["viewer"]
 motion-audit = []
 
 [lib]

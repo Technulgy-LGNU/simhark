@@ -23,6 +23,8 @@ use crate::controller::{Controller, TeamKind, build_controller};
 use crate::director::MatchDirector;
 use crate::evaluator::{Evaluator, MatchReport};
 use crate::logio::GameLog;
+#[cfg(feature = "viewer-debug")]
+use crate::publish_controller_debug;
 use crate::{MatchConfig, PickupValidator, maybe_print_commands, world_config};
 
 /// How long to wait for the Sumatra JVM(s) to connect before giving up.
@@ -235,6 +237,13 @@ fn try_run(mc: &MatchConfig) -> Result<MatchReport> {
         blue_name: Some(blue_name.clone()),
         yellow_name: Some(yellow_name.clone()),
       });
+      #[cfg(feature = "viewer-debug")]
+      publish_controller_debug(
+        v,
+        new_state.world_id,
+        blue_ctrl.as_deref(),
+        yellow_ctrl.as_deref(),
+      );
       v.publish(&new_state);
     }
 

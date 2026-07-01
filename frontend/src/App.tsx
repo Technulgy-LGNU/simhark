@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import { useViewerSocket } from "./hooks/useViewerSocket";
 import FieldCanvas from "./components/FieldCanvas";
 import StatsPanel from "./components/StatsPanel";
@@ -5,6 +6,7 @@ import GameStatePanel from "./components/GameStatePanel";
 import WorldSelector from "./components/WorldSelector";
 import ControlPanel from "./components/ControlPanel";
 import TestPanel from "./components/TestPanel";
+import DebugPanel from "./components/DebugPanel";
 
 declare global {
   interface Window {
@@ -13,6 +15,8 @@ declare global {
 }
 
 const FALLBACK_WS_PORT = 8316;
+type ViewerRoute = "default" | "debug" | "debug-big";
+type DebugTeamFilter = "Blue" | "Yellow" | null;
 
 function resolveWsPort(): number {
   if (typeof window !== "undefined" && typeof window.__SIMHARK_WS_PORT__ === "number") {
@@ -21,13 +25,120 @@ function resolveWsPort(): number {
   return FALLBACK_WS_PORT;
 }
 
+function resolveViewerRoute(): ViewerRoute {
+  if (typeof window === "undefined") return "default";
+  switch (window.location.pathname) {
+    case "/debug":
+      return "debug";
+    case "/debug-big":
+      return "debug-big";
+    default:
+      return "default";
+  }
+}
+
+function resolveDebugTeamFilter(): DebugTeamFilter {
+  if (typeof window === "undefined") return null;
+  const team = new URLSearchParams(window.location.search).get("team");
+  switch (team?.toLowerCase()) {
+    case "blue":
+      return "Blue";
+    case "yellow":
+      return "Yellow";
+    default:
+      return null;
+  }
+}
+
 export default function App() {
   const wsPort = resolveWsPort();
+  const route = resolveViewerRoute();
+  const debugTeam = resolveDebugTeamFilter();
   const { frame, connected, selectWorld, selectWorlds, sendControl, setSpeed } =
     useViewerSocket(wsPort);
   const control = frame?.control ?? { web_enabled: false, running: true, speed: 1 };
   const selectedWorlds = frame?.selected_worlds ?? [frame?.selected_world ?? 0];
+  const showDebug = route !== "default";
 
+  if (route === "debug-big") {
+    return (
+      <AppShell connected={connected}>
+        <div className="flex-1 grid min-h-0 gap-2 p-2 grid-cols-[minmax(0,1fr)_minmax(420px,0.95fr)]">
+          <div className="min-w-0 glass-panel overflow-hidden panel-accent">
+            <FieldCanvas
+              frame={frame}
+              debugTeamFilter={debugTeam}
+              showDebugOverlays
+            />
+          </div>
+          <div className="min-w-0 glass-panel panel-accent overflow-hidden flex flex-col">
+            <div className="shrink-0 grid grid-cols-2 border-b border-slate-700/30">
+              <GameStatePanel
+                gameState={frame?.game_state ?? null}
+                goals={frame?.goals ?? { blue: 0, yellow: 0, blue_active: false, yellow_active: false }}
+              />
+              <StatsPanel frame={frame} />
+            </div>
+            <div className="flex-1 min-h-0">
+              <DebugPanel
+                debug={frame?.debug ?? null}
+                teamFilter={debugTeam}
+                variant="big"
+              />
+            </div>
+          </div>
+        </div>
+      </AppShell>
+    );
+  }
+
+  return (
+    <AppShell connected={connected}>
+      <div className="flex-1 flex min-h-0 gap-2 p-2">
+        <div className="flex-1 min-w-0">
+          <div className="h-full glass-panel overflow-hidden panel-accent">
+            <FieldCanvas
+              frame={frame}
+              debugTeamFilter={debugTeam}
+              showDebugOverlays={showDebug}
+            />
+          </div>
+        </div>
+
+        <div className="w-88 shrink-0 glass-panel panel-accent flex flex-col overflow-y-auto overflow-x-hidden">
+          <ControlPanel control={control} onSend={sendControl} onSpeed={setSpeed} />
+          <WorldSelector
+            worldCount={frame?.world_count ?? 0}
+            selected={selectedWorlds}
+            suite={frame?.test_suite ?? null}
+            onSelect={selectWorlds}
+          />
+          <TestPanel
+            suite={frame?.test_suite ?? null}
+            selectedWorld={frame?.selected_world ?? 0}
+            onSelect={selectWorld}
+          />
+          <GameStatePanel
+            gameState={frame?.game_state ?? null}
+            goals={frame?.goals ?? { blue: 0, yellow: 0, blue_active: false, yellow_active: false }}
+          />
+          {showDebug && (
+            <DebugPanel debug={frame?.debug ?? null} teamFilter={debugTeam} />
+          )}
+          <StatsPanel frame={frame} />
+        </div>
+      </div>
+    </AppShell>
+  );
+}
+
+function AppShell({
+  connected,
+  children,
+}: {
+  connected: boolean;
+  children: ReactNode;
+}) {
   return (
     <div className="h-full flex flex-col bg-dot-pattern text-slate-100">
       <header className="flex items-center justify-between px-5 py-2.5 bg-slate-900/80 backdrop-blur-xl border-b border-slate-700/40 shrink-0 relative">
@@ -72,34 +183,7 @@ export default function App() {
           </span>
         </div>
       </header>
-
-      <div className="flex-1 flex min-h-0 gap-2 p-2">
-        <div className="flex-1 min-w-0">
-          <div className="h-full glass-panel overflow-hidden panel-accent">
-            <FieldCanvas frame={frame} />
-          </div>
-        </div>
-
-        <div className="w-88 shrink-0 glass-panel panel-accent flex flex-col overflow-y-auto overflow-x-hidden">
-          <ControlPanel control={control} onSend={sendControl} onSpeed={setSpeed} />
-          <WorldSelector
-            worldCount={frame?.world_count ?? 0}
-            selected={selectedWorlds}
-            suite={frame?.test_suite ?? null}
-            onSelect={selectWorlds}
-          />
-          <TestPanel
-            suite={frame?.test_suite ?? null}
-            selectedWorld={frame?.selected_world ?? 0}
-            onSelect={selectWorld}
-          />
-          <GameStatePanel
-            gameState={frame?.game_state ?? null}
-            goals={frame?.goals ?? { blue: 0, yellow: 0, blue_active: false, yellow_active: false }}
-          />
-          <StatsPanel frame={frame} />
-        </div>
-      </div>
+      {children}
     </div>
   );
 }

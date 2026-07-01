@@ -1,8 +1,17 @@
 import { useRef, useEffect, useCallback } from "react";
-import type { FieldConfig, RobotState, ViewerFrame } from "../hooks/useViewerSocket";
+import type {
+  FieldConfig,
+  DebugOverlay,
+  RobotDebugInfo,
+  RobotState,
+  ViewerDebugSnapshot,
+  ViewerFrame,
+} from "../hooks/useViewerSocket";
 
 interface FieldCanvasProps {
   frame: ViewerFrame | null;
+  debugTeamFilter?: "Blue" | "Yellow" | null;
+  showDebugOverlays?: boolean;
 }
 
 const FIELD_GREEN_LIGHT = "#1a5c34";
@@ -30,7 +39,11 @@ const WORLD_COLORS = [
 
 type WorldTint = (typeof WORLD_COLORS)[number];
 
-export default function FieldCanvas({ frame }: FieldCanvasProps) {
+export default function FieldCanvas({
+  frame,
+  debugTeamFilter = null,
+  showDebugOverlays = false,
+}: FieldCanvasProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const frameRef = useRef<ViewerFrame | null>(frame);
@@ -97,6 +110,14 @@ export default function FieldCanvas({ frame }: FieldCanvasProps) {
 
     const visibleStates = snapshot.states?.length ? snapshot.states : [snapshot.state];
     const worldOpacity = visibleStates.length > 1 ? 0.55 : 1;
+    const debugSnapshot = snapshot.debug ?? null;
+    const debugRobots =
+      visibleStates.length === 1
+        ? robotDebugLookup(debugSnapshot, debugTeamFilter)
+        : null;
+    if (showDebugOverlays && visibleStates.length === 1 && debugSnapshot) {
+      drawDebugOverlays(ctx, toCanvas, scale, field, debugSnapshot, debugTeamFilter);
+    }
 
     for (const state of visibleStates) {
       const tint = worldTint(state.world_id);
@@ -105,11 +126,31 @@ export default function FieldCanvas({ frame }: FieldCanvasProps) {
 
       for (const robot of state.blue_robots) {
         if (!robot.is_on) continue;
-        drawRobot(ctx, toCanvas, scale, robotRadius, robot, tint, BLUE_COLOR);
+        const debug = debugRobots?.get(robotDebugKey(robot));
+        drawRobot(
+          ctx,
+          toCanvas,
+          scale,
+          robotRadius,
+          robot,
+          tint,
+          BLUE_COLOR,
+          debug?.color
+        );
       }
       for (const robot of state.yellow_robots) {
         if (!robot.is_on) continue;
-        drawRobot(ctx, toCanvas, scale, robotRadius, robot, tint, YELLOW_COLOR);
+        const debug = debugRobots?.get(robotDebugKey(robot));
+        drawRobot(
+          ctx,
+          toCanvas,
+          scale,
+          robotRadius,
+          robot,
+          tint,
+          YELLOW_COLOR,
+          debug?.color
+        );
       }
 
       drawBall(ctx, toCanvas, scale, ballRadius, state.ball, tint);
@@ -264,33 +305,41 @@ function drawRobot(
   robotRadius: number,
   robot: RobotState,
   tint: WorldTint,
-  teamColor: string
+  teamColor: string,
+  debugColor?: string
 ) {
   const [rx, ry] = toCanvas(robot.x, robot.y);
   const r = Math.max(robotRadius * scale, 8);
+  const debugTint = debugColor ? tintFromHexColor(debugColor) : null;
+  const bodyTint = debugTint ?? tint;
+  const flatDebugColor = debugColor && !debugTint ? debugColor.trim() : null;
 
   const glowGrad = ctx.createRadialGradient(rx, ry, r, rx, ry, r * 2.5);
-  glowGrad.addColorStop(0, hexToRgba(tint.base, 0.24));
+  glowGrad.addColorStop(0, hexToRgba(bodyTint.base, 0.24));
   glowGrad.addColorStop(1, "rgba(0,0,0,0)");
   ctx.fillStyle = glowGrad;
   ctx.beginPath();
   ctx.arc(rx, ry, r * 2.5, 0, Math.PI * 2);
   ctx.fill();
 
-  const bodyGrad = ctx.createRadialGradient(
-    rx - r * 0.3,
-    ry - r * 0.3,
-    0,
-    rx,
-    ry,
-    r
-  );
-  bodyGrad.addColorStop(0, tint.light);
-  bodyGrad.addColorStop(0.55, tint.base);
-  bodyGrad.addColorStop(1, tint.dark);
   ctx.beginPath();
   ctx.arc(rx, ry, r, 0, Math.PI * 2);
-  ctx.fillStyle = bodyGrad;
+  if (flatDebugColor) {
+    ctx.fillStyle = flatDebugColor;
+  } else {
+    const bodyGrad = ctx.createRadialGradient(
+      rx - r * 0.3,
+      ry - r * 0.3,
+      0,
+      rx,
+      ry,
+      r
+    );
+    bodyGrad.addColorStop(0, bodyTint.light);
+    bodyGrad.addColorStop(0.55, bodyTint.base);
+    bodyGrad.addColorStop(1, bodyTint.dark);
+    ctx.fillStyle = bodyGrad;
+  }
   ctx.fill();
 
   ctx.strokeStyle = "rgba(2, 6, 23, 0.82)";
@@ -336,6 +385,134 @@ function drawRobot(
   ctx.strokeText(String(robot.id), rx, ry);
   ctx.fillStyle = "#ffffff";
   ctx.fillText(String(robot.id), rx, ry);
+}
+
+function drawDebugOverlays(
+  ctx: CanvasRenderingContext2D,
+  toCanvas: (x: number, y: number) => [number, number],
+  scale: number,
+  field: FieldConfig,
+  debug: ViewerDebugSnapshot,
+  teamFilter: "Blue" | "Yellow" | null
+) {
+  for (const overlay of debug.overlays ?? []) {
+    if (teamFilter && overlay.team !== teamFilter) continue;
+    if (overlay.kind === "holo_robot") {
+      drawHoloRobot(ctx, toCanvas, scale, overlay);
+    } else {
+      drawKickLine(ctx, toCanvas, scale, field, overlay);
+    }
+  }
+}
+
+function drawHoloRobot(
+  ctx: CanvasRenderingContext2D,
+  toCanvas: (x: number, y: number) => [number, number],
+  scale: number,
+  overlay: Extract<DebugOverlay, { kind: "holo_robot" }>
+) {
+  const [x, y] = toCanvas(overlay.x, overlay.y);
+  const r = Math.max(0.09 * scale, 9);
+  const color = normalizeHexColor(overlay.color) ?? overlay.color;
+
+  ctx.save();
+  ctx.setLineDash([6, 4]);
+  ctx.lineWidth = 2.2;
+  ctx.strokeStyle = color;
+  ctx.fillStyle = hexToRgba(normalizeHexColor(overlay.color) ?? "#ffffff", 0.12);
+  ctx.beginPath();
+  ctx.arc(x, y, r, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.stroke();
+  ctx.setLineDash([]);
+
+  if (typeof overlay.orientation === "number") {
+    const dx = Math.cos(overlay.orientation) * (r + 7);
+    const dy = -Math.sin(overlay.orientation) * (r + 7);
+    ctx.beginPath();
+    ctx.moveTo(x, y);
+    ctx.lineTo(x + dx, y + dy);
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 2.2;
+    ctx.lineCap = "round";
+    ctx.stroke();
+  }
+
+  ctx.font = 'bold 10px "JetBrains Mono", monospace';
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.strokeStyle = "rgba(2, 6, 23, 0.85)";
+  ctx.lineWidth = 3;
+  const label = `${overlay.id}`;
+  ctx.strokeText(label, x, y);
+  ctx.fillStyle = "#ffffff";
+  ctx.fillText(label, x, y);
+  ctx.restore();
+}
+
+function drawKickLine(
+  ctx: CanvasRenderingContext2D,
+  toCanvas: (x: number, y: number) => [number, number],
+  scale: number,
+  field: FieldConfig,
+  overlay: Extract<DebugOverlay, { kind: "kick_line" }>
+) {
+  const end = rayFieldIntersection(
+    overlay.from_x,
+    overlay.from_y,
+    overlay.angle,
+    field
+  );
+  const [x1, y1] = toCanvas(overlay.from_x, overlay.from_y);
+  const [x2, y2] = toCanvas(end.x, end.y);
+  const color = normalizeHexColor(overlay.color) ?? overlay.color;
+
+  ctx.save();
+  ctx.strokeStyle = color;
+  ctx.fillStyle = color;
+  ctx.lineWidth = Math.max(2, scale * 0.01);
+  ctx.setLineDash([10, 6]);
+  ctx.beginPath();
+  ctx.moveTo(x1, y1);
+  ctx.lineTo(x2, y2);
+  ctx.stroke();
+  ctx.setLineDash([]);
+
+  const angle = Math.atan2(y2 - y1, x2 - x1);
+  const head = 10;
+  ctx.beginPath();
+  ctx.moveTo(x2, y2);
+  ctx.lineTo(
+    x2 - Math.cos(angle - 0.45) * head,
+    y2 - Math.sin(angle - 0.45) * head
+  );
+  ctx.lineTo(
+    x2 - Math.cos(angle + 0.45) * head,
+    y2 - Math.sin(angle + 0.45) * head
+  );
+  ctx.closePath();
+  ctx.fill();
+
+  ctx.beginPath();
+  ctx.arc(x2, y2, 4, 0, Math.PI * 2);
+  ctx.fillStyle = "#ffffff";
+  ctx.fill();
+  ctx.strokeStyle = color;
+  ctx.lineWidth = 2;
+  ctx.stroke();
+
+  if (overlay.label) {
+    ctx.font = '10px "JetBrains Mono", monospace';
+    ctx.textAlign = "left";
+    ctx.textBaseline = "bottom";
+    ctx.strokeStyle = "rgba(2, 6, 23, 0.85)";
+    ctx.lineWidth = 3;
+    const text = `${overlay.team[0]}${overlay.id} ${overlay.label}`;
+    ctx.strokeText(text, x2 + 6, y2 - 4);
+    ctx.fillStyle = "#ffffff";
+    ctx.fillText(text, x2 + 6, y2 - 4);
+  }
+  ctx.restore();
 }
 
 function drawBall(
@@ -389,15 +566,104 @@ function worldTint(worldId: number): WorldTint {
   return WORLD_COLORS[positiveModulo(worldId, WORLD_COLORS.length)];
 }
 
+function robotDebugLookup(
+  debug: ViewerDebugSnapshot | null,
+  teamFilter: "Blue" | "Yellow" | null
+): Map<string, RobotDebugInfo> | null {
+  if (!debug?.robots.length) return null;
+  return new Map(
+    debug.robots
+      .filter((robot) => !teamFilter || robot.team === teamFilter)
+      .map((robot) => [robotDebugKey(robot), robot])
+  );
+}
+
+function robotDebugKey(robot: { team: "Blue" | "Yellow"; id: number }): string {
+  return `${robot.team}:${robot.id}`;
+}
+
 function positiveModulo(value: number, divisor: number): number {
   return ((value % divisor) + divisor) % divisor;
 }
 
+function tintFromHexColor(color: string): WorldTint | null {
+  const hex = normalizeHexColor(color);
+  if (!hex) return null;
+
+  const { r, g, b } = rgbFromHex(hex);
+  const light = mixRgb({ r, g, b }, { r: 255, g: 255, b: 255 }, 0.58);
+  const dark = mixRgb({ r, g, b }, { r: 2, g: 6, b: 23 }, 0.42);
+  return {
+    base: hex,
+    light: rgbToHex(light),
+    dark: rgbToHex(dark),
+  };
+}
+
+function normalizeHexColor(color: string): string | null {
+  const trimmed = color.trim();
+  const match = trimmed.match(/^#?([0-9a-fA-F]{6})$/);
+  return match ? `#${match[1].toLowerCase()}` : null;
+}
+
+function rayFieldIntersection(
+  x: number,
+  y: number,
+  angle: number,
+  field: FieldConfig
+): { x: number; y: number } {
+  const dx = Math.cos(angle);
+  const dy = Math.sin(angle);
+  const halfX = field.field_length / 2;
+  const halfY = field.field_width / 2;
+  const candidates: number[] = [];
+  const eps = 1e-9;
+
+  if (Math.abs(dx) > eps) {
+    candidates.push((halfX - x) / dx, (-halfX - x) / dx);
+  }
+  if (Math.abs(dy) > eps) {
+    candidates.push((halfY - y) / dy, (-halfY - y) / dy);
+  }
+
+  const distance =
+    candidates
+      .filter((t) => t > 0)
+      .map((t) => ({ t, px: x + dx * t, py: y + dy * t }))
+      .filter(({ px, py }) => px >= -halfX - 1e-6 && px <= halfX + 1e-6 && py >= -halfY - 1e-6 && py <= halfY + 1e-6)
+      .sort((left, right) => left.t - right.t)[0]?.t ?? 3.0;
+
+  return { x: x + dx * distance, y: y + dy * distance };
+}
+
 function hexToRgba(hex: string, alpha: number): string {
+  const { r, g, b } = rgbFromHex(hex);
+  return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+}
+
+function rgbFromHex(hex: string): { r: number; g: number; b: number } {
   const normalized = hex.replace("#", "");
   const value = Number.parseInt(normalized, 16);
   const r = (value >> 16) & 255;
   const g = (value >> 8) & 255;
   const b = value & 255;
-  return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+  return { r, g, b };
+}
+
+function mixRgb(
+  first: { r: number; g: number; b: number },
+  second: { r: number; g: number; b: number },
+  amount: number
+): { r: number; g: number; b: number } {
+  return {
+    r: Math.round(first.r + (second.r - first.r) * amount),
+    g: Math.round(first.g + (second.g - first.g) * amount),
+    b: Math.round(first.b + (second.b - first.b) * amount),
+  };
+}
+
+function rgbToHex({ r, g, b }: { r: number; g: number; b: number }): string {
+  return `#${[r, g, b]
+    .map((value) => value.toString(16).padStart(2, "0"))
+    .join("")}`;
 }

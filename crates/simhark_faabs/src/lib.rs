@@ -1,4 +1,6 @@
 mod conv;
+#[cfg(feature = "viewer-debug")]
+mod debug;
 #[cfg(feature = "interface")]
 mod interface;
 mod run;
@@ -25,6 +27,8 @@ pub struct Faabs<A: Ai = DummyAi> {
   pub feedback_robot: u32,
   pub team: TeamColor,
   pub events: crashpilot::Events,
+  #[cfg(feature = "viewer-debug")]
+  latest_debug: Option<simhark::viewer::ViewerDebugSnapshot>,
   #[cfg(feature = "interface")]
   pub interface: EventShare,
   #[cfg(feature = "interface")]
@@ -79,6 +83,8 @@ impl<A: Ai + Send> Faabs<A> {
       feedback_robot: 0,
       team,
       events: crashpilot::Events::default(),
+      #[cfg(feature = "viewer-debug")]
+      latest_debug: None,
       #[cfg(feature = "interface")]
       interface: EventShare::default(),
       #[cfg(feature = "interface")]
@@ -105,8 +111,18 @@ impl<A: Ai + Send> Faabs<A> {
     }
 
     let ws = self.events.ws.clone();
+    #[cfg(feature = "viewer-debug")]
+    let debug_referee = self.events.gc.clone();
 
     let (interface, robots) = self.crash_pilot.step_with_data(mem::take(&mut self.events));
+    #[cfg(not(feature = "interface"))]
+    let _ = &interface;
+    #[cfg(feature = "viewer-debug")]
+    let debug_ai_commands = *self.crash_pilot.ai_commands();
+    #[cfg(feature = "viewer-debug")]
+    let mut debug_robots = Vec::new();
+    #[cfg(feature = "viewer-debug")]
+    let mut debug_overlays = Vec::new();
 
     #[cfg(feature = "interface")]
     {
@@ -124,9 +140,26 @@ impl<A: Ai + Send> Faabs<A> {
         );
       };
 
+      #[cfg(feature = "viewer-debug")]
+      let cp_robot = data.msg.clone();
       let events = conv::robot_events(id, data, state, self.team);
 
       let (teensy, robot_cp) = robot.step_with_data(events);
+
+      #[cfg(feature = "viewer-debug")]
+      let ai_command = debug_ai_commands.get(id as usize).copied().flatten();
+      #[cfg(feature = "viewer-debug")]
+      debug_robots.push(debug::robot_debug_info(
+        id, self.team, ai_command, &cp_robot, &teensy, state,
+      ));
+      #[cfg(feature = "viewer-debug")]
+      debug_overlays.extend(debug::robot_debug_overlays(
+        id,
+        self.team,
+        ai_command,
+        &cp_robot.cmd,
+        state,
+      ));
 
       run_sim_action(id, teensy, command, self.team);
 
@@ -137,6 +170,25 @@ impl<A: Ai + Send> Faabs<A> {
 
     self.feedback_robot += 1;
     self.feedback_robot %= self.robots.len() as u32;
+
+    #[cfg(feature = "viewer-debug")]
+    {
+      let ai_debug = self.crash_pilot.get_ai().debug();
+      self.latest_debug = Some(debug::snapshot(
+        state.world_id,
+        self.team,
+        state,
+        debug_referee.as_ref(),
+        Some(ai_debug),
+        debug_robots,
+        debug_overlays,
+      ));
+    }
+  }
+
+  #[cfg(feature = "viewer-debug")]
+  pub fn debug_snapshot(&self) -> Option<simhark::viewer::ViewerDebugSnapshot> {
+    self.latest_debug.clone()
   }
 }
 

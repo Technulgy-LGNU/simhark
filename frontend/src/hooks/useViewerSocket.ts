@@ -91,6 +91,43 @@ export interface TestSuiteSnapshot {
   tests: TestStatus[];
 }
 
+export interface RobotDebugInfo {
+  team: "Blue" | "Yellow";
+  id: number;
+  task: string;
+  color: string;
+  message: string | null;
+}
+
+export type DebugOverlay =
+  | {
+      kind: "holo_robot";
+      team: "Blue" | "Yellow";
+      id: number;
+      x: number;
+      y: number;
+      orientation: number | null;
+      color: string;
+      label: string | null;
+    }
+  | {
+      kind: "kick_line";
+      team: "Blue" | "Yellow";
+      id: number;
+      from_x: number;
+      from_y: number;
+      angle: number;
+      color: string;
+      label: string | null;
+    };
+
+export interface ViewerDebugSnapshot {
+  world_id: number;
+  strategy: string | null;
+  robots: RobotDebugInfo[];
+  overlays?: DebugOverlay[];
+}
+
 export interface ViewerFrame {
   world_count: number;
   selected_world: number;
@@ -104,6 +141,7 @@ export interface ViewerFrame {
   test_suite: TestSuiteSnapshot | null;
   goals: GoalSummary;
   control: ControlSnapshot;
+  debug?: ViewerDebugSnapshot | null;
 }
 
 const RECONNECT_DELAY_MS = 1000;
