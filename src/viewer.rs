@@ -65,6 +65,19 @@ pub struct GameStateInfo {
   pub yellow_name: Option<String>,
 }
 
+#[derive(Debug, Clone, Serialize)]
+pub struct BallTrajectory {
+  pub world_id: usize,
+  pub points: Vec<BallTrajectoryPoint>,
+  pub stop_time: f64,
+}
+
+#[derive(Debug, Clone, Copy, Serialize)]
+pub struct BallTrajectoryPoint {
+  pub x: f64,
+  pub y: f64,
+}
+
 #[cfg(feature = "viewer-debug")]
 #[derive(Debug, Clone, Default, Serialize)]
 pub struct ViewerDebugSnapshot {
@@ -214,6 +227,8 @@ pub struct ViewerServer {
   field: FieldConfig,
   robot_radius: f64,
   ball_radius: f64,
+  ball_friction: f64,
+  gravity: f64,
   selected_world: Arc<AtomicUsize>,
   selected_worlds: Arc<Mutex<Vec<usize>>>,
   latest_frame: Arc<Mutex<Option<String>>>,
@@ -235,6 +250,7 @@ struct ViewerFrame<'a> {
   field: &'a FieldConfig,
   robot_radius: f64,
   ball_radius: f64,
+  ball_trajectory: Option<BallTrajectory>,
   state: &'a WorldState,
   states: Vec<&'a WorldState>,
   game_state: Option<PublishedGameState<'a>>,
@@ -297,6 +313,8 @@ impl ViewerServer {
       field: world_config.field.clone(),
       robot_radius: world_config.blue_robots.radius,
       ball_radius: world_config.ball.radius,
+      ball_friction: world_config.ball.friction,
+      gravity: world_config.physics.gravity,
       selected_world,
       selected_worlds,
       latest_frame,
@@ -468,6 +486,13 @@ impl ViewerServer {
       field: &self.field,
       robot_radius: self.robot_radius,
       ball_radius: self.ball_radius,
+      ball_trajectory: predicted_ball_trajectory(
+        state,
+        &self.field,
+        self.ball_radius,
+        self.ball_friction,
+        self.gravity,
+      ),
       state,
       states: if selected_states.is_empty() {
         vec![state]
@@ -527,6 +552,133 @@ fn run_http_server(server: Server, ws_port: u16) {
 
     let _ = request.respond(response);
   }
+}
+
+const BALL_TRAJECTORY_MIN_SPEED: f64 = 0.05;
+const BALL_TRAJECTORY_MAX_VERTICAL_SPEED: f64 = 0.2;
+const BALL_TRAJECTORY_MAX_SECONDS: f64 = 8.0;
+const BALL_TRAJECTORY_STEP_SECONDS: f64 = 0.12;
+const BALL_TRAJECTORY_MIN_POINT_SPACING: f64 = 0.03;
+
+fn predicted_ball_trajectory(
+  state: &WorldState,
+  field: &FieldConfig,
+  ball_radius: f64,
+  ball_friction: f64,
+  gravity: f64,
+) -> Option<BallTrajectory> {
+  let planar_speed = state.ball.vx.hypot(state.ball.vy);
+  if planar_speed < BALL_TRAJECTORY_MIN_SPEED {
+    return None;
+  }
+  if state.ball.z > ball_radius * 2.5 || state.ball.vz.abs() > BALL_TRAJECTORY_MAX_VERTICAL_SPEED {
+    return None;
+  }
+
+  let deceleration = ball_friction * gravity;
+  if deceleration <= f64::EPSILON {
+    return None;
+  }
+
+  let dir_x = state.ball.vx / planar_speed;
+  let dir_y = state.ball.vy / planar_speed;
+  let stop_time = (planar_speed / deceleration).min(BALL_TRAJECTORY_MAX_SECONDS);
+  let half_x = field.field_length / 2.0 + field.goal_depth;
+  let half_y = field.field_width / 2.0;
+  let mut points = vec![BallTrajectoryPoint {
+    x: state.ball.x,
+    y: state.ball.y,
+  }];
+
+  let mut reached_boundary = false;
+  let mut t = BALL_TRAJECTORY_STEP_SECONDS;
+  while t < stop_time {
+    let distance = planar_speed * t - 0.5 * deceleration * t * t;
+    let point = BallTrajectoryPoint {
+      x: state.ball.x + dir_x * distance,
+      y: state.ball.y + dir_y * distance,
+    };
+    if point.x.abs() > half_x || point.y.abs() > half_y {
+      if let Some(boundary) =
+        field_boundary_intersection(state.ball.x, state.ball.y, dir_x, dir_y, half_x, half_y)
+      {
+        push_spaced_trajectory_point(&mut points, boundary);
+      }
+      reached_boundary = true;
+      break;
+    }
+    push_spaced_trajectory_point(&mut points, point);
+    t += BALL_TRAJECTORY_STEP_SECONDS;
+  }
+
+  if !reached_boundary {
+    let stop_distance = planar_speed * stop_time - 0.5 * deceleration * stop_time * stop_time;
+    let stop = BallTrajectoryPoint {
+      x: state.ball.x + dir_x * stop_distance,
+      y: state.ball.y + dir_y * stop_distance,
+    };
+    if stop.x.abs() <= half_x && stop.y.abs() <= half_y {
+      push_spaced_trajectory_point(&mut points, stop);
+    } else if let Some(boundary) =
+      field_boundary_intersection(state.ball.x, state.ball.y, dir_x, dir_y, half_x, half_y)
+    {
+      push_spaced_trajectory_point(&mut points, boundary);
+    }
+  }
+
+  (points.len() >= 2).then_some(BallTrajectory {
+    world_id: state.world_id,
+    points,
+    stop_time,
+  })
+}
+
+fn push_spaced_trajectory_point(points: &mut Vec<BallTrajectoryPoint>, point: BallTrajectoryPoint) {
+  let Some(previous) = points.last() else {
+    points.push(point);
+    return;
+  };
+  if (point.x - previous.x).hypot(point.y - previous.y) >= BALL_TRAJECTORY_MIN_POINT_SPACING {
+    points.push(point);
+  }
+}
+
+fn field_boundary_intersection(
+  x: f64,
+  y: f64,
+  dir_x: f64,
+  dir_y: f64,
+  half_x: f64,
+  half_y: f64,
+) -> Option<BallTrajectoryPoint> {
+  let mut candidates = Vec::new();
+  if dir_x.abs() > f64::EPSILON {
+    candidates.push((half_x - x) / dir_x);
+    candidates.push((-half_x - x) / dir_x);
+  }
+  if dir_y.abs() > f64::EPSILON {
+    candidates.push((half_y - y) / dir_y);
+    candidates.push((-half_y - y) / dir_y);
+  }
+
+  candidates
+    .into_iter()
+    .filter(|t| *t > 0.0)
+    .map(|t| BallTrajectoryPoint {
+      x: x + dir_x * t,
+      y: y + dir_y * t,
+    })
+    .filter(|point| {
+      point.x >= -half_x - 1e-6
+        && point.x <= half_x + 1e-6
+        && point.y >= -half_y - 1e-6
+        && point.y <= half_y + 1e-6
+    })
+    .min_by(|left, right| {
+      let left_dist = (left.x - x).hypot(left.y - y);
+      let right_dist = (right.x - x).hypot(right.y - y);
+      left_dist.total_cmp(&right_dist)
+    })
 }
 
 fn run_websocket_server(

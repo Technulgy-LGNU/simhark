@@ -66,7 +66,7 @@ pub fn robot_debug_overlays(
       })
       .unwrap_or_default(),
     Some(CpTask::TaskKick) | Some(CpTask::TaskChip) | Some(CpTask::TaskRecKick) => {
-      kick_line_angle(command, state)
+      kick_line_angle(id, team, ai_command, command, state)
         .map(|angle| {
           vec![DebugOverlay::KickLine(DebugKickLine {
             team,
@@ -88,18 +88,50 @@ pub fn robot_debug_overlays(
   }
 }
 
-fn kick_line_angle(command: &CpCommand, state: &WorldState) -> Option<f64> {
+fn kick_line_angle(
+  id: u32,
+  team: TeamColor,
+  ai_command: Option<AiRobotCommand>,
+  command: &CpCommand,
+  state: &WorldState,
+) -> Option<f64> {
+  if matches!(ai_command, Some(AiRobotCommand::RecPass)) {
+    return moving_ball_angle(state).or_else(|| {
+      command
+        .kick_orient
+        .map(|angle| (angle as f64).to_radians())
+        .or_else(|| receive_pass_angle(id, team, state))
+    });
+  }
+
   command
     .kick_orient
     .map(|angle| (angle as f64).to_radians())
     .or_else(|| {
-      let ball_speed = (state.ball.vx * state.ball.vx + state.ball.vy * state.ball.vy).sqrt();
-      if command.task == CpTask::TaskRecKick as i32 && ball_speed > 0.05 {
-        Some(state.ball.vy.atan2(state.ball.vx))
+      if command.task == CpTask::TaskRecKick as i32 {
+        moving_ball_angle(state)
       } else {
         None
       }
     })
+}
+
+fn moving_ball_angle(state: &WorldState) -> Option<f64> {
+  let ball_speed = (state.ball.vx * state.ball.vx + state.ball.vy * state.ball.vy).sqrt();
+  (ball_speed > 0.05).then_some(state.ball.vy.atan2(state.ball.vx))
+}
+
+fn receive_pass_angle(id: u32, team: TeamColor, state: &WorldState) -> Option<f64> {
+  let receiver = team_robots(state, team)
+    .iter()
+    .find(|robot| robot.id == id as usize)?;
+  let dx = receiver.x - state.ball.x;
+  let dy = receiver.y - state.ball.y;
+  if dx.abs() <= f64::EPSILON && dy.abs() <= f64::EPSILON {
+    return None;
+  }
+
+  Some(dy.atan2(dx))
 }
 
 pub fn snapshot(

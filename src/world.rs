@@ -16,15 +16,12 @@ const BALL_HOLD_DAMPING_GAIN: f32 = 18.0;
 const BALL_HOLD_MAX_FORCE: f32 = 4.0;
 const BALL_OUT_OF_FIELD_RECOVERY_SPEED: f32 = 0.05;
 
-fn field_scaled_dir(yaw: f64, config: &WorldConfig) -> [f64; 2] {
-  let x = yaw.cos() * config.field.field_length;
-  let y = yaw.sin() * config.field.field_width;
-  let len = (x * x + y * y).sqrt();
-  if len <= f64::EPSILON {
-    [1.0, 0.0]
-  } else {
-    [x / len, y / len]
-  }
+// Physics runs in plain metric coordinates, so the kicker mouth axis is the
+// raw yaw direction. Do not scale this by the field aspect: vision reports the
+// same raw yaw, and any skew here makes kicks leave along a direction the
+// robots never aimed at.
+fn heading_dir(yaw: f64) -> [f64; 2] {
+  [yaw.cos(), yaw.sin()]
 }
 
 /// A single simulation world with its own physics and robot state.
@@ -212,7 +209,7 @@ impl World {
         let ball_body = self.physics.ball_body;
         let ball_pos = self.physics.get_body_position(ball_body);
         let yaw = self.physics.get_body_yaw(handle.chassis_body) as f64;
-        let dir = field_scaled_dir(yaw, &self.config);
+        let dir = heading_dir(yaw);
         let chassis_pos = self.physics.get_body_position(handle.chassis_body);
         let contact_origin = contact_origin_from_chassis(chassis_pos, &robot_cfg);
 
@@ -243,17 +240,25 @@ impl World {
           let speed_z = kick_angle_rad.sin() * kick_speed;
 
           let ball_vel = self.physics.get_body_linvel(ball_body);
+          let chassis_vel = self.physics.get_body_linvel(handle.chassis_body);
+          let chassis_angvel = self.physics.get_body_angvel(handle.chassis_body);
           let dir_x = dir[0] as f32;
           let dir_y = dir[1] as f32;
+          let rel_x = ball_pos.x - chassis_pos.x;
+          let rel_y = ball_pos.y - chassis_pos.y;
+          let contact_vx = chassis_vel.x - chassis_angvel.z * rel_y;
+          let contact_vy = chassis_vel.y + chassis_angvel.z * rel_x;
+          let rel_ball_vx = ball_vel.x - contact_vx;
+          let rel_ball_vy = ball_vel.y - contact_vy;
           let kicker_damp = robot_cfg.kicker_damp_factor as f32;
-          let vn = -(ball_vel.x * dir_x + ball_vel.y * dir_y) * kicker_damp;
-          let vt = -(ball_vel.x * dir_y - ball_vel.y * dir_x);
+          let vn = -(rel_ball_vx * dir_x + rel_ball_vy * dir_y) * kicker_damp;
 
-          // Mirror grSim's kicker release: launch along the dribbler
-          // axis, then damp the component along the kicker and cancel
-          // tangential slip so long shots do not inherit sideways drift.
-          let desired_vx = dir_x * speed_xy as f32 + vn * dir_x - vt * dir_y;
-          let desired_vy = dir_y * speed_xy as f32 + vn * dir_y + vt * dir_x;
+          // Launch relative to the moving kicker contact point. A robot that
+          // translates or rotates while releasing the ball gives the ball that
+          // contact velocity, which is the effect higher-level aim compensation
+          // must account for in the real world.
+          let desired_vx = contact_vx + dir_x * speed_xy as f32 + vn * dir_x;
+          let desired_vy = contact_vy + dir_y * speed_xy as f32 + vn * dir_y;
           let desired_vz = speed_z as f32;
           let ball = &mut self.physics.rigid_body_set[ball_body];
           ball.set_linvel(Vector::new(desired_vx, desired_vy, desired_vz), true);
@@ -363,7 +368,7 @@ impl World {
     let chassis_vel = self.physics.get_body_linvel(handle.chassis_body);
     let chassis_angvel = self.physics.get_body_angvel(handle.chassis_body);
     let yaw = self.physics.get_body_yaw(handle.chassis_body) as f64;
-    let dir = field_scaled_dir(yaw, &self.config);
+    let dir = heading_dir(yaw);
     let dir_x = dir[0];
     let dir_y = dir[1];
     let hold_distance = robot_cfg.center_from_kicker
@@ -444,7 +449,7 @@ impl World {
       .filter(|(_, (sim, _))| sim.is_on && sim.dribbler_on && sim.kick_countdown <= 0)
       .filter_map(|(index, (_, handle))| {
         let yaw = self.physics.get_body_yaw(handle.chassis_body) as f64;
-        let dir = field_scaled_dir(yaw, &self.config);
+        let dir = heading_dir(yaw);
         let chassis_pos = self.physics.get_body_position(handle.chassis_body);
         let contact_origin = contact_origin_from_chassis(chassis_pos, robot_cfg);
         let touching = is_ball_touching_kicker(
@@ -493,7 +498,7 @@ impl World {
       return false;
     }
     let yaw = self.physics.get_body_yaw(handle.chassis_body) as f64;
-    let dir = field_scaled_dir(yaw, &self.config);
+    let dir = heading_dir(yaw);
     let chassis_pos = self.physics.get_body_position(handle.chassis_body);
     let contact_origin = contact_origin_from_chassis(chassis_pos, robot_cfg);
     is_ball_touching_kicker(
@@ -735,7 +740,7 @@ impl World {
         let yaw = self.physics.get_body_yaw(handle.chassis_body);
 
         // Check infrared (ball near kicker)
-        let dir = field_scaled_dir(yaw as f64, &self.config);
+        let dir = heading_dir(yaw as f64);
         let contact_origin = contact_origin_from_chassis(pos, robot_cfg);
         // Sumatra's barrier bit needs to stay high for the robot that
         // currently owns the dribbled ball. The geometric kicker test

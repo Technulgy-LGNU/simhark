@@ -1,5 +1,6 @@
 import { useRef, useEffect, useCallback } from "react";
 import type {
+  BallTrajectory,
   FieldConfig,
   DebugOverlay,
   RobotDebugInfo,
@@ -20,6 +21,7 @@ const LINE_COLOR = "#ffffff";
 const LINE_GLOW_COLOR = "rgba(255, 255, 255, 0.15)";
 const BLUE_COLOR = "#3b82f6";
 const YELLOW_COLOR = "#f59e0b";
+const BALL_TRAJECTORY_COLOR = "#ff4fb8";
 const PADDING = 36;
 
 const WORLD_COLORS = [
@@ -117,6 +119,9 @@ export default function FieldCanvas({
         : null;
     if (showDebugOverlays && visibleStates.length === 1 && debugSnapshot) {
       drawDebugOverlays(ctx, toCanvas, scale, field, debugSnapshot, debugTeamFilter);
+    }
+    if (showDebugOverlays && visibleStates.length === 1 && snapshot.ball_trajectory) {
+      drawBallTrajectory(ctx, toCanvas, scale, snapshot.ball_trajectory);
     }
 
     for (const state of visibleStates) {
@@ -296,6 +301,56 @@ function drawFieldLines(
   drawGlowRect(glx, gly, goalW, goalH);
   const [grx, gry] = toCanvas(fieldLength / 2, field.goal_width / 2);
   drawGlowRect(grx, gry, goalW, goalH);
+}
+
+function drawBallTrajectory(
+  ctx: CanvasRenderingContext2D,
+  toCanvas: (x: number, y: number) => [number, number],
+  scale: number,
+  trajectory: BallTrajectory
+) {
+  if (trajectory.points.length < 2) return;
+
+  const points = trajectory.points.map((point) => toCanvas(point.x, point.y));
+
+  ctx.save();
+  ctx.lineCap = "round";
+  ctx.lineJoin = "round";
+  ctx.strokeStyle = "rgba(255, 79, 184, 0.16)";
+  ctx.lineWidth = Math.max(10, scale * 0.055);
+  ctx.beginPath();
+  for (const [index, [x, y]] of points.entries()) {
+    if (index === 0) {
+      ctx.moveTo(x, y);
+    } else {
+      ctx.lineTo(x, y);
+    }
+  }
+  ctx.stroke();
+
+  ctx.strokeStyle = "rgba(255, 79, 184, 0.82)";
+  ctx.lineWidth = Math.max(2.5, scale * 0.018);
+  ctx.setLineDash([Math.max(8, scale * 0.06), Math.max(5, scale * 0.035)]);
+  ctx.beginPath();
+  for (const [index, [x, y]] of points.entries()) {
+    if (index === 0) {
+      ctx.moveTo(x, y);
+    } else {
+      ctx.lineTo(x, y);
+    }
+  }
+  ctx.stroke();
+  ctx.setLineDash([]);
+
+  const [endX, endY] = points[points.length - 1];
+  ctx.fillStyle = BALL_TRAJECTORY_COLOR;
+  ctx.beginPath();
+  ctx.arc(endX, endY, Math.max(4, scale * 0.025), 0, Math.PI * 2);
+  ctx.fill();
+  ctx.strokeStyle = "rgba(255, 255, 255, 0.8)";
+  ctx.lineWidth = 1.5;
+  ctx.stroke();
+  ctx.restore();
 }
 
 function drawRobot(

@@ -23,6 +23,12 @@ export interface BallState {
   vz: number;
 }
 
+export interface BallTrajectory {
+  world_id: number;
+  points: Array<{ x: number; y: number }>;
+  stop_time: number;
+}
+
 export interface RobotState {
   id: number;
   team: "Blue" | "Yellow";
@@ -135,6 +141,7 @@ export interface ViewerFrame {
   field: FieldConfig;
   robot_radius: number;
   ball_radius: number;
+  ball_trajectory: BallTrajectory | null;
   state: WorldState;
   states?: WorldState[];
   game_state: GameStateInfo | null;

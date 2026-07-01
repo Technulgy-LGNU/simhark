@@ -557,6 +557,112 @@ fn test_kick_contact_reenables_without_followup_command() {
 }
 
 #[test]
+fn test_flat_kick_inherits_kicker_contact_velocity() {
+  let mut config = WorldConfig::division_a();
+  config.robots_per_team = 1;
+  let mut world = World::new(0, config);
+  let robot_x = -3.0;
+  let robot_y = -3.0;
+
+  world.step(&WorldCommand {
+    teleport_ball: Some(TeleportBall {
+      x: Some(robot_x + world.config.blue_robots.center_from_kicker + world.config.ball.radius),
+      y: Some(robot_y),
+      z: Some(0.0),
+      vx: Some(0.0),
+      vy: Some(0.0),
+      vz: Some(0.0),
+    }),
+    teleport_robots: vec![TeleportRobot {
+      id: 0,
+      team: TeamColor::Blue,
+      x: Some(robot_x),
+      y: Some(robot_y),
+      orientation: Some(0.0),
+      vx: Some(0.0),
+      vy: Some(1.0),
+      v_angular: Some(0.0),
+      present: Some(true),
+    }],
+    blue: vec![RobotCommand {
+      id: 0,
+      move_command: None,
+      kick_speed: 2.0,
+      kick_angle: 0.0,
+      dribbler_on: true,
+    }],
+    ..Default::default()
+  });
+
+  let state = world.get_state();
+  assert!(
+    state.ball.vx > 1.5,
+    "flat kick should still launch forward, vx={}",
+    state.ball.vx
+  );
+  assert!(
+    state.ball.vy > 0.5,
+    "flat kick should inherit sideways kicker velocity, vy={}",
+    state.ball.vy
+  );
+}
+
+#[test]
+fn test_flat_kick_launches_along_robot_heading_on_diagonal() {
+  let mut config = WorldConfig::division_a();
+  config.robots_per_team = 1;
+  let mut world = World::new(0, config);
+  let robot_x = -3.0;
+  let robot_y = -3.0;
+  let yaw = std::f64::consts::FRAC_PI_4;
+  let mouth_dist = world.config.blue_robots.center_from_kicker + world.config.ball.radius;
+
+  world.step(&WorldCommand {
+    teleport_ball: Some(TeleportBall {
+      x: Some(robot_x + yaw.cos() * mouth_dist),
+      y: Some(robot_y + yaw.sin() * mouth_dist),
+      z: Some(0.0),
+      vx: Some(0.0),
+      vy: Some(0.0),
+      vz: Some(0.0),
+    }),
+    teleport_robots: vec![TeleportRobot {
+      id: 0,
+      team: TeamColor::Blue,
+      x: Some(robot_x),
+      y: Some(robot_y),
+      orientation: Some(yaw),
+      vx: Some(0.0),
+      vy: Some(0.0),
+      v_angular: Some(0.0),
+      present: Some(true),
+    }],
+    blue: vec![RobotCommand {
+      id: 0,
+      move_command: None,
+      kick_speed: 4.0,
+      kick_angle: 0.0,
+      dribbler_on: true,
+    }],
+    ..Default::default()
+  });
+
+  let state = world.get_state();
+  let launch_angle = state.ball.vy.atan2(state.ball.vx);
+  let angle_error_deg = (launch_angle - yaw).to_degrees();
+  assert!(
+    state.ball.vx > 1.0 && state.ball.vy > 1.0,
+    "diagonal flat kick should launch, v=({}, {})",
+    state.ball.vx,
+    state.ball.vy
+  );
+  assert!(
+    angle_error_deg.abs() < 1.0,
+    "stationary robot must kick along its heading; got {angle_error_deg:.2} deg off"
+  );
+}
+
+#[test]
 fn test_infrared_requires_ball_in_front_of_robot() {
   let mut config = WorldConfig::division_a();
   config.robots_per_team = 1;
